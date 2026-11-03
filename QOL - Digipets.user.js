@@ -10,6 +10,10 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @noframes
+// @homepageURL  https://github.com/mateuspedro/QOL-DigiPets
+// @supportURL   https://github.com/mateuspedro/QOL-DigiPets/issues
+// @updateURL    https://raw.githubusercontent.com/mateuspedro/QOL-DigiPets/main/QOL%20-%20Digipets.user.js
+// @downloadURL  https://raw.githubusercontent.com/mateuspedro/QOL-DigiPets/main/QOL%20-%20Digipets.user.js
 // ==/UserScript==
 
 (() => {
