@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QOL - Digipets
 // @namespace    https://digipets.net/
-// @version      1.3.3
+// @version      1.3.5
 // @description  Navegação QOL para DigiPets: bosses, Digitamas, loja, costumes, party e contadores.
 // @author       Kizano
 // @match        https://digipets.net/*
@@ -260,6 +260,9 @@
             #panel.open { display: flex; }
             .header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 48px; padding: 8px 11px; background: linear-gradient(110deg,#25144c,#124d80 62%,#087e88); color: white; }
             .header strong { font-size: 14px; }
+            .panel-footer { display: grid; flex: 0 0 auto; gap: 3px; padding: 9px 12px; border-top: 1px solid #47d9ec55; background: linear-gradient(110deg,#17152f,#102744 65%,#172541); color: #d9eaf7; text-align: center; }
+            .panel-footer strong { color: #ffe083; font-size: 11px; }
+            .panel-footer small { color: #a9c8d8; font: 10px/1.4 Arial,sans-serif; }
             .header button, button { border: 1px solid #47d9ec88; border-radius: 9px; padding: 8px 11px; background: linear-gradient(135deg,#147db0,#3158b4); color: white; font: 700 12px Arial,sans-serif; cursor: pointer; box-shadow: 0 3px 9px #020b1a66; transition: transform .14s ease,filter .14s ease,box-shadow .14s ease; }
             button:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.13); box-shadow: 0 5px 13px #020b1a88; }
             button.gray { border-color: #9c83ee66; background: linear-gradient(135deg,#554187,#384e92); }
@@ -460,6 +463,7 @@
         <section id="panel" role="dialog" aria-label="QOL - Digipets">
             <header class="header"><strong>✦ QOL - Digipets</strong><button type="button" class="gray" data-action="close" aria-label="Fechar">×</button></header>
             <main class="content" id="content"></main>
+            <footer class="panel-footer"><strong>Criado por Kizano</strong><small>Para mais dicas, contacte-me pelo jogo: Kizano (ID #4019)</small></footer>
         </section>
         <div id="feature-modal" role="dialog" aria-modal="true" aria-labelledby="feature-modal-title">
             <section class="feature-window">
