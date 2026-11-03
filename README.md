@@ -14,7 +14,7 @@ Uma interface complementar para facilitar a navegação e o gerenciamento de alg
 
 ## Instalação
 
-1. Instale o Tampermonkey pela loja de extensões do seu navegador.
+1. Instale o Tampermonkey pela loja de extensões do seu navegador. https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo?hl=pt-PT
 2. Abra o arquivo [QOL - Digipets.user.js](./QOL%20-%20Digipets.user.js) no GitHub e use o botão **Raw**. Com o Tampermonkey instalado, o navegador deverá oferecer a instalação do userscript.
 3. Confirme a instalação no Tampermonkey.
 4. Acesse ou atualize [digipets.net](https://digipets.net/) e entre na sua conta.
