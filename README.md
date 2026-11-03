@@ -5,6 +5,9 @@ Uma interface complementar para facilitar a navegação e o gerenciamento de alg
 > **Versão:** 1.3.3  
 > **Userscript:** [QOL - Digipets.user.js](./QOL%20-%20Digipets.user.js)
 
+## Dúvidas/Sugestões
+Me chame no jogo: Kizano (ID #4019)
+
 ## Requisitos
 
 - Uma conta no DigiPets e uma sessão iniciada em `https://digipets.net/`.
