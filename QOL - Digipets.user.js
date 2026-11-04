@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QOL - Digipets
 // @namespace    https://digipets.net/
-// @version      1.3.5
+// @version      1.3.6
 // @description  Navegação QOL para DigiPets: bosses, Digitamas, loja, costumes, party e contadores.
 // @author       Kizano
 // @match        https://digipets.net/*
@@ -159,12 +159,8 @@
     let partySearch = "";
     let partySort = "power-desc";
     const alertNotified = new Set();
-    let hookedJQuery = null;
-    let originalJQueryAlert = null;
-    let wrappedJQueryAlert = null;
-    let popupInstallTimer = 0;
-    let popupWatchdogTimer = 0;
-    let popupFailureNoticeAt = 0;
+    let digifarmPopupObserver = null;
+    const handledDigifarmDialogs = new WeakSet();
     let saveTimer = 0;
     let toastTimer = 0;
     let lastSyncRequestAt = 0;
@@ -1890,90 +1886,76 @@
         }
     }
 
-    function isDigifarmNotificationAlert(options) {
-        if (!options || typeof options !== "object") return false;
-        const html = [options.title, options.content]
-            .filter((value) => typeof value === "string")
-            .join(" ");
+    function isDigifarmNotificationDialog(dialog) {
+        if (!dialog?.isConnected || !isPageElementVisible(dialog)) return false;
+        const html = dialog.innerHTML;
         if (!/(?:href\s*=\s*["']\/usuario_digifarm|popup_digifarm\.jpg)/i.test(html)) return false;
-        const text = new DOMParser().parseFromString(html, "text/html").body.textContent.toLocaleLowerCase();
+        const text = dialog.textContent.toLocaleLowerCase();
         return (/\bdigitama\b/.test(text) && /\b(?:chocou|eclodiu|abriu)\b/.test(text))
             || /recebeu\s+exp\s+na\s+digifarm/.test(text);
     }
 
-    function installPopupFilter() {
-        if (!state.blockRepeatingPopups) return true;
-        const jquery = window.jQuery;
-        if (!jquery || typeof jquery.alert !== "function") return false;
-        if (jquery === hookedJQuery && jquery.alert === wrappedJQueryAlert) return true;
-        const original = jquery.alert;
-        const wrapped = function (options, ...args) {
-            const confirm = options?.buttons?.ok?.action;
-            if (state.blockRepeatingPopups && isDigifarmNotificationAlert(options) && typeof confirm === "function") {
-                try {
-                    Reflect.apply(confirm, this, []);
-                    return undefined;
-                } catch (error) {
-                    console.error("[QOL - Digipets] Não foi possível dispensar o aviso repetido.", error);
-                }
-            }
-            return Reflect.apply(original, this, [options, ...args]);
-        };
-        try {
-            jquery.alert = wrapped;
-        } catch (error) {
-            console.error("[QOL - Digipets] Não foi possível substituir jQuery.alert.", error);
-            return false;
+    function dismissDigifarmNotificationDialog(dialog) {
+        if (!state.blockRepeatingPopups
+            || handledDigifarmDialogs.has(dialog)
+            || !isDigifarmNotificationDialog(dialog)) return;
+        const confirmButton = Array.from(dialog.querySelectorAll(".jconfirm-buttons button"))
+            .find((button) => button.textContent.trim().toLocaleLowerCase() === "ok"
+                && !button.disabled
+                && isPageElementVisible(button));
+        if (!confirmButton) return;
+        handledDigifarmDialogs.add(dialog);
+        confirmButton.click();
+    }
+
+    function collectDigifarmDialogs(node, dialogs, includeDescendants = false) {
+        const element = node?.nodeType === 1 ? node : node?.parentElement;
+        if (!element) return;
+        const selector = ".jconfirm-box[role='dialog']";
+        const enclosingDialog = element.matches(selector) ? element : element.closest(selector);
+        if (enclosingDialog) dialogs.add(enclosingDialog);
+        if (includeDescendants) {
+            element.querySelectorAll(selector).forEach((dialog) => dialogs.add(dialog));
         }
-        if (jquery.alert !== wrapped) return false;
-        hookedJQuery = jquery;
-        originalJQueryAlert = original;
-        wrappedJQueryAlert = wrapped;
+    }
+
+    function scanDigifarmDialogs(root = document) {
+        root.querySelectorAll(".jconfirm-box[role='dialog']")
+            .forEach(dismissDigifarmNotificationDialog);
+    }
+
+    function activatePopupFilter() {
+        if (!state.blockRepeatingPopups) return true;
+        if (!digifarmPopupObserver) {
+            if (typeof MutationObserver !== "function" || !document.documentElement) {
+                console.error("[QOL - Digipets] MutationObserver indisponível; não foi possível monitorar os popups da Digifarm.");
+                return false;
+            }
+            const observer = new MutationObserver((records) => {
+                if (!state.blockRepeatingPopups) return;
+                const dialogs = new Set();
+                for (const record of records) {
+                    collectDigifarmDialogs(record.target, dialogs);
+                    record.addedNodes.forEach((node) => collectDigifarmDialogs(node, dialogs, true));
+                }
+                dialogs.forEach(dismissDigifarmNotificationDialog);
+            });
+            try {
+                observer.observe(document.documentElement, { childList: true, subtree: true });
+                digifarmPopupObserver = observer;
+            } catch (error) {
+                observer.disconnect();
+                console.error("[QOL - Digipets] Não foi possível monitorar os popups da Digifarm.", error);
+                return false;
+            }
+        }
+        scanDigifarmDialogs();
         return true;
     }
 
     function deactivatePopupFilter() {
-        clearInterval(popupInstallTimer);
-        clearInterval(popupWatchdogTimer);
-        popupInstallTimer = 0;
-        popupWatchdogTimer = 0;
-        if (hookedJQuery?.alert === wrappedJQueryAlert) hookedJQuery.alert = originalJQueryAlert;
-        hookedJQuery = null;
-        originalJQueryAlert = null;
-        wrappedJQueryAlert = null;
-    }
-
-    function activatePopupFilter() {
-        if (installPopupFilter()) {
-            if (!popupWatchdogTimer) {
-                popupWatchdogTimer = window.setInterval(() => {
-                    if (!state.blockRepeatingPopups) {
-                        deactivatePopupFilter();
-                        return;
-                    }
-                    installPopupFilter();
-                }, 1500);
-            }
-            return;
-        }
-        if (popupInstallTimer) return;
-        let attempts = 0;
-        popupInstallTimer = window.setInterval(() => {
-            attempts += 1;
-            if (installPopupFilter()) {
-                clearInterval(popupInstallTimer);
-                popupInstallTimer = 0;
-                activatePopupFilter();
-            } else if (attempts >= 40) {
-                clearInterval(popupInstallTimer);
-                popupInstallTimer = 0;
-                if (Date.now() - popupFailureNoticeAt > 5 * 60 * 1000) {
-                    popupFailureNoticeAt = Date.now();
-                    console.error("[QOL - Digipets] O bloqueio está ativado, mas jQuery.alert não ficou disponível.");
-                    showToast("Não foi possível instalar o bloqueio de popups nesta página.");
-                }
-            }
-        }, 500);
+        digifarmPopupObserver?.disconnect();
+        digifarmPopupObserver = null;
     }
 
     function toggleFavorite(stage) {
@@ -2129,10 +2111,13 @@
         } else if (action === "toggle-popups") {
             state.blockRepeatingPopups = !state.blockRepeatingPopups;
             const saved = saveState();
-            if (state.blockRepeatingPopups) activatePopupFilter();
-            else deactivatePopupFilter();
+            const filterReady = state.blockRepeatingPopups
+                ? activatePopupFilter()
+                : (deactivatePopupFilter(), true);
             render();
-            showToast(`Bloqueio de popups ${state.blockRepeatingPopups ? "ativado" : "desativado"}.`
+            showToast(`${filterReady
+                ? `Bloqueio de popups ${state.blockRepeatingPopups ? "ativado" : "desativado"}.`
+                : "Não foi possível ativar o bloqueio de popups nesta página."}`
                 + (saved ? "" : " A preferência não foi salva."));
         } else if (action === "favorite-stage") {
             toggleFavorite(target.dataset.stage);
@@ -2224,7 +2209,9 @@
             console.error("[QOL - Digipets] Não foi possível ler o episódio aberto.", error);
         }
     }
-    if (state.blockRepeatingPopups) activatePopupFilter();
+    if (state.blockRepeatingPopups && !activatePopupFilter()) {
+        showToast("Não foi possível ativar o bloqueio de popups nesta página.");
+    }
     installBattleResultObserver();
     window.setInterval(updateCountdowns, 1000);
     window.setInterval(checkBossAlerts, 15000);
