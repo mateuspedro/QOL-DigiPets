@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QOL - Digipets
 // @namespace    https://digipets.net/
-// @version      1.3.9
+// @version      1.3.10
 // @description  Navegação QOL para DigiPets: bosses, Digitamas, loja, costumes, party e contadores.
 // @author       Kizano
 // @match        https://digipets.net/*
@@ -23,7 +23,7 @@
     if (document.getElementById(HOST_ID)) return;
 
     const STORE_KEY = "qolDigipets.state.v1";
-    const CURRENT_VERSION = "1.3.8";
+    const CURRENT_VERSION = "1.3.10";
     const UPDATE_CHECK_KEY = "qolDigipets.updateCheck.v1";
     const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000;
     const UPDATE_CHECK_TIMEOUT = 8000;
@@ -566,7 +566,7 @@
         }
     }
 
-    async function checkForUpdate() {
+    async function checkForUpdate(force = false) {
         if (updateCheckRunning || !store) return;
         updateCheckRunning = true;
         let cached = null;
@@ -581,7 +581,7 @@
         }
         const checkedAt = Number(cached?.checkedAt) || 0;
         const cacheAge = Date.now() - checkedAt;
-        if (checkedAt > 0 && cacheAge >= 0 && cacheAge < UPDATE_CHECK_INTERVAL) {
+        if (!force && checkedAt > 0 && cacheAge >= 0 && cacheAge < UPDATE_CHECK_INTERVAL) {
             updateCheckRunning = false;
             return;
         }
@@ -2398,7 +2398,7 @@
         console.error("[QOL - Digipets] gm-storage não foi carregado; confirme a instala\u00e7ão do userscript.");
     }
     state = loadState();
-    void checkForUpdate();
+    void checkForUpdate(true);
     window.setInterval(() => void checkForUpdate(), UPDATE_CHECK_INTERVAL);
     updateViewportMetrics();
 
