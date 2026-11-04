@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QOL - Digipets
 // @namespace    https://digipets.net/
-// @version      1.3.7
+// @version      1.3.9
 // @description  Navegação QOL para DigiPets: bosses, Digitamas, loja, costumes, party e contadores.
 // @author       Kizano
 // @match        https://digipets.net/*
@@ -23,6 +23,12 @@
     if (document.getElementById(HOST_ID)) return;
 
     const STORE_KEY = "qolDigipets.state.v1";
+    const CURRENT_VERSION = "1.3.8";
+    const UPDATE_CHECK_KEY = "qolDigipets.updateCheck.v1";
+    const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000;
+    const UPDATE_CHECK_TIMEOUT = 8000;
+    const UPDATE_SOURCE_URL = "https://raw.githubusercontent.com/mateuspedro/QOL-DigiPets/main/QOL%20-%20Digipets.user.js";
+    const REPOSITORY_URL = "https://github.com/mateuspedro/QOL-DigiPets";
     const EPISODE_RANGES = [[1, 13], [26, 49], [70, 90], [94, 94], [100, 133], [138, 161]];
     const EPISODE_EXTRA = [53];
     const EPISODE_IDS = [...new Set([
@@ -161,6 +167,7 @@
     const alertNotified = new Set();
     let digifarmPopupObserver = null;
     const handledDigifarmDialogs = new WeakSet();
+    let updateCheckRunning = false;
     let saveTimer = 0;
     let toastTimer = 0;
     let lastSyncRequestAt = 0;
@@ -258,7 +265,12 @@
             #panel { position: fixed; right: 18px; bottom: 74px; z-index: 2147483000; display: none; width: min(460px,calc(100vw - 24px)); height: min(620px,calc(100vh - 100px)); height: min(620px,calc(var(--qol-viewport-height) - 100px)); flex-direction: column; overflow: hidden; border: 1px solid #9be9f266; border-radius: 14px; background: #f5f8fc; color: #1d2c3c; font: 14px Arial,sans-serif; box-shadow: 0 14px 44px #06192b66; }
             #panel.open { display: flex; }
             .header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 48px; padding: 8px 11px; background: linear-gradient(110deg,#25144c,#124d80 62%,#087e88); color: white; }
-            .header strong { font-size: 14px; }
+            .header strong { flex: 1; font-size: 14px; }
+            .update-notice { position: relative; display: inline-flex; min-width: 40px; min-height: 40px; align-items: center; justify-content: center; gap: 5px; padding: 6px 9px; border: 1px solid #ffe083; border-radius: 9px; background: linear-gradient(135deg,#604817,#47333d); color: #ffe083; font: 700 11px Arial,sans-serif; text-decoration: none; box-shadow: 0 3px 9px #020b1a66; }
+            .update-notice[hidden] { display: none; }
+            .update-notice:hover { filter: brightness(1.13); }
+            .update-icon { font-size: 16px; line-height: 1; }
+            .update-badge { position: absolute; top: -6px; right: -6px; padding: 2px 5px; border: 1px solid #142744; border-radius: 999px; background: #e85d72; color: white; font-size: 9px; }
             .panel-footer { display: grid; flex: 0 0 auto; gap: 3px; padding: 9px 12px max(9px,env(safe-area-inset-bottom)); border-top: 1px solid #47d9ec55; background: linear-gradient(110deg,#17152f,#102744 65%,#172541); color: #d9eaf7; text-align: center; }
             .panel-footer strong { color: #ffe083; font-size: 11px; }
             .panel-footer small { color: #a9c8d8; font: 10px/1.4 Arial,sans-serif; }
@@ -472,6 +484,8 @@
                 .shop-pager button { min-height: 44px; }
                 .header { min-height: 52px; padding: 6px 8px 6px 12px; }
                 .header button { width: 44px; height: 44px; padding: 0; font-size: 20px; }
+                .update-notice { width: 44px; min-height: 44px; padding: 6px; }
+                .update-notice > span:not(.update-icon) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
                 .home-link { min-height: 58px; padding: 12px; }
                 .config-row { align-items: flex-start; }
                 .switch { min-height: 44px; }
@@ -492,7 +506,7 @@
         </style>
         <button id="launcher" type="button" aria-expanded="false">✦ QOL - Digipets</button>
         <section id="panel" role="dialog" aria-label="QOL - Digipets">
-            <header class="header"><strong>✦ QOL - Digipets</strong><button type="button" class="gray" data-action="close" aria-label="Fechar">×</button></header>
+            <header class="header"><strong>✦ QOL - Digipets</strong><a id="update-notice" class="update-notice" href="${REPOSITORY_URL}" target="_blank" rel="noopener noreferrer" aria-label="Nova versão disponível. Abrir repositório no GitHub." title="Nova versão disponível — abrir repositório no GitHub" hidden><span class="update-icon" aria-hidden="true">⬆</span><span>Atualização</span><span class="update-badge">NOVA</span></a><button type="button" class="gray" data-action="close" aria-label="Fechar">×</button></header>
             <main class="content" id="content"></main>
             <footer class="panel-footer"><strong>Criado por Kizano</strong><small>Para mais dicas, contacte-me pelo jogo: Kizano (ID #4019)</small></footer>
         </section>
@@ -513,6 +527,7 @@
     const modalContent = shadow.querySelector("#feature-modal-content");
     const modalTitle = shadow.querySelector("#feature-modal-title");
     const toast = shadow.querySelector("#toast");
+    const updateNotice = shadow.querySelector("#update-notice");
 
     function escapeHtml(value) {
         return String(value ?? "").replace(/[&<>"']/g, (character) => ({
@@ -525,6 +540,81 @@
         toast.classList.add("open");
         clearTimeout(toastTimer);
         toastTimer = window.setTimeout(() => toast.classList.remove("open"), 3500);
+    }
+
+    function compareVersions(left, right) {
+        const parse = (value) => /^\d+(?:\.\d+)*$/.test(String(value))
+            ? String(value).split(".").map(Number)
+            : null;
+        const first = parse(left);
+        const second = parse(right);
+        if (!first || !second) return null;
+        const length = Math.max(first.length, second.length);
+        for (let index = 0; index < length; index += 1) {
+            const difference = (first[index] || 0) - (second[index] || 0);
+            if (difference) return Math.sign(difference);
+        }
+        return 0;
+    }
+
+    function setUpdateNotice(version) {
+        const hasUpdate = Boolean(version);
+        updateNotice.hidden = !hasUpdate;
+        if (hasUpdate) {
+            updateNotice.title = `Versão ${version} disponível — abrir repositório no GitHub`;
+            updateNotice.setAttribute("aria-label", `Versão ${version} disponível. Abrir repositório no GitHub.`);
+        }
+    }
+
+    async function checkForUpdate() {
+        if (updateCheckRunning || !store) return;
+        updateCheckRunning = true;
+        let cached = null;
+        try {
+            cached = store.get(UPDATE_CHECK_KEY);
+        } catch (error) {
+            console.warn("[QOL - Digipets] Não foi possível ler o cache da verificação de atualização.", error);
+        }
+        const cachedVersion = typeof cached?.version === "string" ? cached.version : "";
+        if (compareVersions(cachedVersion, CURRENT_VERSION) === 1) {
+            setUpdateNotice(cachedVersion);
+        }
+        const checkedAt = Number(cached?.checkedAt) || 0;
+        const cacheAge = Date.now() - checkedAt;
+        if (checkedAt > 0 && cacheAge >= 0 && cacheAge < UPDATE_CHECK_INTERVAL) {
+            updateCheckRunning = false;
+            return;
+        }
+
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), UPDATE_CHECK_TIMEOUT);
+        try {
+            const response = await fetch(UPDATE_SOURCE_URL, {
+                cache: "no-store",
+                credentials: "omit",
+                headers: { Accept: "text/plain" },
+                signal: controller.signal
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const script = await response.text();
+            const remoteVersion = script.match(/^\s*\/\/\s*@version\s+([0-9]+(?:\.[0-9]+)*)\s*$/m)?.[1];
+            if (!remoteVersion) throw new Error("Não foi possível ler a versão publicada.");
+            const comparison = compareVersions(remoteVersion, CURRENT_VERSION);
+            if (comparison === null) throw new Error(`Versão remota inválida: ${remoteVersion}`);
+            setUpdateNotice(comparison > 0 ? remoteVersion : "");
+            const nextCache = { checkedAt: Date.now(), version: remoteVersion };
+            store.set(UPDATE_CHECK_KEY, nextCache);
+            const savedCache = store.get(UPDATE_CHECK_KEY);
+            if (Number(savedCache?.checkedAt) !== nextCache.checkedAt
+                || savedCache?.version !== nextCache.version) {
+                throw new Error("O cache da verificação não foi persistido.");
+            }
+        } catch (error) {
+            console.warn("[QOL - Digipets] Não foi possível verificar se há atualização.", error);
+        } finally {
+            clearTimeout(timeout);
+            updateCheckRunning = false;
+        }
     }
 
     function formatRemaining(seconds) {
@@ -2308,6 +2398,8 @@
         console.error("[QOL - Digipets] gm-storage não foi carregado; confirme a instala\u00e7ão do userscript.");
     }
     state = loadState();
+    void checkForUpdate();
+    window.setInterval(() => void checkForUpdate(), UPDATE_CHECK_INTERVAL);
     updateViewportMetrics();
 
     const currentEpisode = location.pathname === "/estagios"
