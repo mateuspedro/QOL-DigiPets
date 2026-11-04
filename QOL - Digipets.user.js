@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QOL - Digipets
 // @namespace    https://digipets.net/
-// @version      1.3.6
+// @version      1.3.7
 // @description  Navegação QOL para DigiPets: bosses, Digitamas, loja, costumes, party e contadores.
 // @author       Kizano
 // @match        https://digipets.net/*
@@ -249,25 +249,28 @@
     const shadow = host.attachShadow({ mode: "open" });
     shadow.innerHTML = `
         <style>
-            :host { all: initial; font-family: Arial,sans-serif; }
+            :host { all: initial; --qol-viewport-height: 100vh; --qol-viewport-width: 100vw; --qol-safe-top: env(safe-area-inset-top,0px); --qol-safe-right: env(safe-area-inset-right,0px); --qol-safe-bottom: env(safe-area-inset-bottom,0px); --qol-safe-left: env(safe-area-inset-left,0px); display: block; font-family: Arial,sans-serif; }
+            @supports (height: 100dvh) {
+                :host { --qol-viewport-height: 100dvh; }
+            }
             * { box-sizing: border-box; }
-            #launcher { position: fixed; right: 18px; bottom: 18px; z-index: 2147483000; padding: 11px 15px; border: 1px solid #ffe083; border-radius: 999px; background: linear-gradient(130deg,#241a52,#075f91 58%,#00a4a8); color: #fff; font: 700 13px Arial,sans-serif; cursor: grab; touch-action: none; user-select: none; box-shadow: 0 5px 22px #001a2d99,0 0 14px #22e8e088; }
-            #panel { position: fixed; right: 18px; bottom: 74px; z-index: 2147483000; display: none; width: min(460px,calc(100vw - 24px)); height: min(620px,calc(100vh - 100px)); flex-direction: column; overflow: hidden; border: 1px solid #9be9f266; border-radius: 14px; background: #f5f8fc; color: #1d2c3c; font: 14px Arial,sans-serif; box-shadow: 0 14px 44px #06192b66; }
+            #launcher { position: fixed; right: max(18px,env(safe-area-inset-right)); bottom: max(18px,env(safe-area-inset-bottom)); z-index: 2147483000; min-height: 44px; padding: 11px 15px; border: 1px solid #ffe083; border-radius: 999px; background: linear-gradient(130deg,#241a52,#075f91 58%,#00a4a8); color: #fff; font: 700 13px Arial,sans-serif; cursor: grab; touch-action: none; user-select: none; box-shadow: 0 5px 22px #001a2d99,0 0 14px #22e8e088; }
+            #panel { position: fixed; right: 18px; bottom: 74px; z-index: 2147483000; display: none; width: min(460px,calc(100vw - 24px)); height: min(620px,calc(100vh - 100px)); height: min(620px,calc(var(--qol-viewport-height) - 100px)); flex-direction: column; overflow: hidden; border: 1px solid #9be9f266; border-radius: 14px; background: #f5f8fc; color: #1d2c3c; font: 14px Arial,sans-serif; box-shadow: 0 14px 44px #06192b66; }
             #panel.open { display: flex; }
             .header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 48px; padding: 8px 11px; background: linear-gradient(110deg,#25144c,#124d80 62%,#087e88); color: white; }
             .header strong { font-size: 14px; }
-            .panel-footer { display: grid; flex: 0 0 auto; gap: 3px; padding: 9px 12px; border-top: 1px solid #47d9ec55; background: linear-gradient(110deg,#17152f,#102744 65%,#172541); color: #d9eaf7; text-align: center; }
+            .panel-footer { display: grid; flex: 0 0 auto; gap: 3px; padding: 9px 12px max(9px,env(safe-area-inset-bottom)); border-top: 1px solid #47d9ec55; background: linear-gradient(110deg,#17152f,#102744 65%,#172541); color: #d9eaf7; text-align: center; }
             .panel-footer strong { color: #ffe083; font-size: 11px; }
             .panel-footer small { color: #a9c8d8; font: 10px/1.4 Arial,sans-serif; }
-            .header button, button { border: 1px solid #47d9ec88; border-radius: 9px; padding: 8px 11px; background: linear-gradient(135deg,#147db0,#3158b4); color: white; font: 700 12px Arial,sans-serif; cursor: pointer; box-shadow: 0 3px 9px #020b1a66; transition: transform .14s ease,filter .14s ease,box-shadow .14s ease; }
+            .header button, button { min-height: 40px; border: 1px solid #47d9ec88; border-radius: 9px; padding: 8px 11px; background: linear-gradient(135deg,#147db0,#3158b4); color: white; font: 700 12px Arial,sans-serif; cursor: pointer; touch-action: manipulation; box-shadow: 0 3px 9px #020b1a66; transition: transform .14s ease,filter .14s ease,box-shadow .14s ease; }
             button:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.13); box-shadow: 0 5px 13px #020b1a88; }
             button.gray { border-color: #9c83ee66; background: linear-gradient(135deg,#554187,#384e92); }
             button.green { border-color: #ffe083; background: linear-gradient(135deg,#ffdf71,#ff9e43); color: #2b2045; }
             button.red { border-color: #ff91a3; background: linear-gradient(135deg,#fa5b78,#c93767); }
             button:disabled { opacity: .54; cursor: not-allowed; box-shadow: none; }
             button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #ffe083; outline-offset: 2px; }
-            .content { min-height: 0; overflow: auto; padding: 14px; background: radial-gradient(ellipse at 85% 2%,#18365b44,transparent 45%); }
-            .toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+            .content { min-height: 0; flex: 1; overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 14px; background: radial-gradient(ellipse at 85% 2%,#18365b44,transparent 45%); }
+            .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
             .toolbar strong { flex: 1; }
             .toolbar-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
             .intro { margin: 0 0 12px; color: #607487; font-size: 12px; line-height: 1.45; }
@@ -348,15 +351,15 @@
             .feature-copy { justify-items: center; }
             .feature-copy strong { white-space: normal; }
             .feature-actions { justify-content: center; }
-            #panel.expanded { width: min(1120px,calc(100vw - 32px)); height: min(850px,calc(100vh - 40px)); }
+            #panel.expanded { width: min(1120px,calc(100vw - 32px)); height: min(850px,calc(100vh - 40px)); height: min(850px,calc(var(--qol-viewport-height) - 40px)); }
             #panel.expanded .content { padding: 18px; }
             #panel.expanded .feature-list { grid-template-columns: repeat(auto-fill,minmax(185px,1fr)); gap: 12px; }
-            #feature-modal { position: fixed; inset: 0; z-index: 2147483250; display: none; align-items: center; justify-content: center; padding: 24px; background: #050c18cc; color: #eaf5ff; font: 14px Arial,sans-serif; }
+            #feature-modal { position: fixed; inset: 0; z-index: 2147483250; display: none; align-items: center; justify-content: center; overscroll-behavior: contain; padding: max(24px,env(safe-area-inset-top)) max(24px,env(safe-area-inset-right)) max(24px,env(safe-area-inset-bottom)) max(24px,env(safe-area-inset-left)); background: #050c18cc; color: #eaf5ff; font: 14px Arial,sans-serif; }
             #feature-modal.open { display: flex; }
-            .feature-window { position: relative; display: flex; flex-direction: column; width: min(1280px,96vw); height: min(900px,94vh); overflow: hidden; border: 1px solid #55dceb; border-radius: 16px; background: radial-gradient(ellipse at 90% 0%,#16395766,transparent 44%),linear-gradient(145deg,#15132f,#102744 58%,#18243f); color: #eaf5ff; font: 14px Arial,sans-serif; box-shadow: 0 22px 70px #000c,0 0 28px #00d5ff33; }
+            .feature-window { position: relative; display: flex; flex-direction: column; width: min(1280px,96vw); height: min(900px,94vh); height: min(900px,calc(var(--qol-viewport-height) - 32px)); overflow: hidden; border: 1px solid #55dceb; border-radius: 16px; background: radial-gradient(ellipse at 90% 0%,#16395766,transparent 44%),linear-gradient(145deg,#15132f,#102744 58%,#18243f); color: #eaf5ff; font: 14px Arial,sans-serif; box-shadow: 0 22px 70px #000c,0 0 28px #00d5ff33; }
             .feature-modal-head { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 12px; min-height: 62px; padding: 12px 18px; border-bottom: 1px solid #ffe08355; background: linear-gradient(110deg,#26164a,#15416a 65%,#0d6b77); }
             .feature-modal-head strong { color: #ffe083; font-size: 16px; }
-            .feature-modal-body { min-height: 0; flex: 1; overflow: auto; padding: 16px; }
+            .feature-modal-body { min-height: 0; flex: 1; overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 16px; }
             .shop-tabs { display: flex; gap: 8px; padding: 12px 16px 0; }
             .shop-tabs button { border-color: #43718f; background: #1a3049; color: #b9d8e8; }
             .shop-tabs button.selected { border-color: #55e3f2; background: #087e91; color: white; }
@@ -375,7 +378,7 @@
             .shop-rank { display: flex; align-items: center; gap: 5px; color: #b9d8e8; font-size: 11px; }
             .shop-rank img { width: auto; height: 18px; object-fit: contain; }
             .shop-ratings { display: flex; justify-content: center; gap: 5px; flex-wrap: wrap; }
-            .shop-pager { display: flex; justify-content: center; align-items: center; gap: 12px; padding: 12px; border-top: 1px solid #26c6da44; }
+            .shop-pager { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 12px; padding: 12px; border-top: 1px solid #26c6da44; }
             .shop-confirm { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; padding: 18px; background: #040b15cc; }
             .shop-confirm[hidden] { display: none; }
             .shop-confirm-card { width: min(390px,100%); padding: 20px; border: 1px solid #55e3f2; border-radius: 10px; background: #142941; box-shadow: 0 10px 40px #000b; }
@@ -434,13 +437,16 @@
             @media (max-width: 900px) { .shop-grid { grid-template-columns: repeat(4,minmax(0,1fr)); } }
             @media (max-width: 760px) { .shop-grid { grid-template-columns: repeat(3,minmax(0,1fr)); } }
             @media (max-width: 600px) {
-                #panel.expanded { width: calc(100vw - 16px); height: calc(100vh - 16px); }
+                #panel, #panel.expanded { width: calc(var(--qol-viewport-width,100vw) - 16px); height: calc(var(--qol-viewport-height,100vh) - 16px); max-height: calc(var(--qol-viewport-height,100vh) - 16px); border-radius: 14px; }
+                button { min-height: 44px; }
                 .stage-card { grid-template-columns: 1fr; }
                 .stage-actions { justify-content: space-between; }
-                #feature-modal { padding: 8px; }
-                .feature-window { width: 100%; height: calc(100vh - 16px); border-radius: 12px; }
+                .stage-actions button { min-height: 44px; }
+                #feature-modal { padding: max(8px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left)); }
+                .feature-window { width: 100%; height: calc(var(--qol-viewport-height,100vh) - 16px); max-height: calc(var(--qol-viewport-height,100vh) - 16px); border-radius: 12px; }
                 .feature-modal-body { padding: 10px; }
-                .feature-modal-head { padding: 10px 12px; }
+                .feature-modal-head { min-height: 56px; padding: 8px 10px; }
+                .feature-modal-head button { min-width: 72px; min-height: 44px; }
                 .shop-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; padding: 4px 10px 10px; }
                 .shop-card { padding: 8px; }
                 .shop-card > img { height: 82px; }
@@ -452,8 +458,37 @@
                 .party-slot-art { grid-row: span 2; width: 64px; height: 64px; }
                 .party-slot-art img { max-height: 60px; }
                 .party-slot-actions { grid-column: 2; justify-content: start; }
+                .shop-tabs { position: sticky; top: -10px; z-index: 1; padding: 8px 10px 0; background: #121e33; }
+                .shop-tabs button { flex: 1; min-height: 44px; }
+                .shop-tools { gap: 7px; padding: 10px; }
+                .shop-tools input, .shop-tools select, .party-modal-tools .search, .party-modal-tools select,
+                .search, .feature-tools input, .feature-tools select { min-height: 44px; font-size: 16px; }
+                .shop-ratings button, .fashion-card-actions button, .party-slot-actions button { min-height: 44px; }
+                .shop-confirm { position: fixed; }
+                .shop-confirm-card { max-height: 100%; overflow: auto; padding: 16px; }
+                .shop-confirm-actions { flex-wrap: wrap; }
+                .shop-confirm-actions button { flex: 1; min-height: 44px; }
+                .shop-pager { gap: 8px; padding: 10px 4px; }
+                .shop-pager button { min-height: 44px; }
+                .header { min-height: 52px; padding: 6px 8px 6px 12px; }
+                .header button { width: 44px; height: 44px; padding: 0; font-size: 20px; }
+                .home-link { min-height: 58px; padding: 12px; }
+                .config-row { align-items: flex-start; }
+                .switch { min-height: 44px; }
+                #toast { right: max(12px,env(safe-area-inset-right)); bottom: max(72px,calc(env(safe-area-inset-bottom) + 60px)); max-width: calc(100vw - 24px); }
             }
-            @media (max-width: 360px) { .shop-grid, .fashion-grid { grid-template-columns: 1fr; } }
+            @media (max-width: 360px) {
+                .shop-grid, .fashion-grid { grid-template-columns: 1fr; }
+                .toolbar-actions { width: 100%; justify-content: stretch; }
+                .toolbar-actions button { flex: 1; }
+                .config-row { flex-direction: column; }
+                .config-row > button, .sync-tools { width: 100%; }
+                .sync-tools button { flex: 1; min-height: 44px; }
+                .shop-tools button { min-height: 44px; }
+            }
+            @media (hover: none) {
+                button:hover:not(:disabled) { transform: none; filter: none; }
+            }
         </style>
         <button id="launcher" type="button" aria-expanded="false">✦ QOL - Digipets</button>
         <section id="panel" role="dialog" aria-label="QOL - Digipets">
@@ -1498,6 +1533,7 @@
             if (modalView === "shop") renderShop();
             else if (modalView === "fashion") renderFashion();
             else if (modalView === "party") renderParty();
+            updateViewportMetrics();
             return;
         }
         const expanded = ["bosses", "digitamas"].includes(view);
@@ -1509,6 +1545,7 @@
         else if (view === "bosses") renderBosses(false);
         else if (view === "digitamas") renderBosses(true);
         else renderHome();
+        updateViewportMetrics();
     }
 
     function applyLauncherPosition() {
@@ -1520,30 +1557,99 @@
             launcher.style.bottom = "18px";
             return;
         }
-        const maxLeft = Math.max(8, window.innerWidth - launcher.offsetWidth - 8);
-        const maxTop = Math.max(8, window.innerHeight - launcher.offsetHeight - 8);
-        const left = Math.min(maxLeft, Math.max(8, position.left));
-        const top = Math.min(maxTop, Math.max(8, position.top));
+        const viewport = window.visualViewport;
+        const viewportWidth = viewport?.width || window.innerWidth;
+        const viewportHeight = viewport?.height || window.innerHeight;
+        const mobileViewport = window.matchMedia("(max-width: 600px)").matches;
+        const safeArea = mobileViewport ? getSafeAreaInsets() : { top: 0, right: 0, bottom: 0, left: 0 };
+        const minLeft = Math.max(8, safeArea.left);
+        const minTop = Math.max(8, safeArea.top);
+        const maxLeft = Math.max(minLeft, viewportWidth - launcher.offsetWidth - Math.max(8, safeArea.right));
+        const maxTop = Math.max(minTop, viewportHeight - launcher.offsetHeight - Math.max(8, safeArea.bottom));
+        const left = Math.min(maxLeft, Math.max(minLeft, position.left));
+        const top = Math.min(maxTop, Math.max(minTop, position.top));
         launcher.style.left = `${left}px`;
         launcher.style.top = `${top}px`;
         launcher.style.right = "auto";
         launcher.style.bottom = "auto";
     }
 
+    function getSafeAreaInsets() {
+        const styles = window.getComputedStyle(host);
+        const read = (property) => Math.max(0, Number.parseFloat(styles.getPropertyValue(property)) || 0);
+        return {
+            top: read("--qol-safe-top"),
+            right: read("--qol-safe-right"),
+            bottom: read("--qol-safe-bottom"),
+            left: read("--qol-safe-left")
+        };
+    }
+
     function positionPanelNearLauncher() {
         if (!panel.classList.contains("open")) return;
+        const viewport = window.visualViewport;
+        const viewportLeft = viewport?.offsetLeft || 0;
+        const viewportTop = viewport?.offsetTop || 0;
+        const viewportWidth = viewport?.width || window.innerWidth;
+        const viewportHeight = viewport?.height || window.innerHeight;
+        const mobileViewport = window.matchMedia("(max-width: 600px)").matches;
+        const safeArea = mobileViewport ? getSafeAreaInsets() : { top: 0, right: 0, bottom: 0, left: 0 };
+        const insetTop = Math.max(8, safeArea.top);
+        const insetRight = Math.max(8, safeArea.right);
+        const insetBottom = Math.max(8, safeArea.bottom);
+        const insetLeft = Math.max(8, safeArea.left);
+        if (mobileViewport) {
+            panel.style.width = `${Math.max(0, viewportWidth - insetLeft - insetRight)}px`;
+            panel.style.height = `${Math.max(0, viewportHeight - insetTop - insetBottom)}px`;
+        } else {
+            panel.style.width = "";
+            panel.style.height = "";
+        }
         const launcherRect = launcher.getBoundingClientRect();
         const panelRect = panel.getBoundingClientRect();
-        const width = panelRect.width || Math.min(460, window.innerWidth - 24);
-        const height = panelRect.height || Math.min(620, window.innerHeight - 24);
-        const left = Math.min(window.innerWidth - width - 8, Math.max(8, launcherRect.right - width));
+        const width = panelRect.width || Math.min(460, viewportWidth - 24);
+        const height = panelRect.height || Math.min(620, viewportHeight - 24);
+        const left = mobileViewport
+            ? viewportLeft + insetLeft
+            : Math.min(viewportLeft + viewportWidth - width - 8, Math.max(viewportLeft + 8, launcherRect.right - width));
+        if (mobileViewport) {
+            panel.style.left = `${left}px`;
+            panel.style.top = `${viewportTop + insetTop}px`;
+            panel.style.right = "auto";
+            panel.style.bottom = "auto";
+            return;
+        }
         let top = launcherRect.top - height - 10;
-        if (top < 8) top = launcherRect.bottom + 10;
-        top = Math.min(window.innerHeight - height - 8, Math.max(8, top));
+        if (top < viewportTop + 8) top = launcherRect.bottom + 10;
+        top = Math.min(viewportTop + viewportHeight - height - 8, Math.max(viewportTop + 8, top));
         panel.style.left = `${left}px`;
         panel.style.top = `${top}px`;
         panel.style.right = "auto";
         panel.style.bottom = "auto";
+    }
+
+    function updateViewportMetrics() {
+        const viewport = window.visualViewport;
+        if (viewport) {
+            host.style.setProperty("--qol-viewport-width", `${viewport.width}px`);
+            host.style.setProperty("--qol-viewport-height", `${viewport.height}px`);
+        } else {
+            host.style.removeProperty("--qol-viewport-width");
+            host.style.removeProperty("--qol-viewport-height");
+        }
+        applyLauncherPosition();
+        positionPanelNearLauncher();
+        if (modalView && viewport) {
+            featureModal.style.left = `${viewport.offsetLeft}px`;
+            featureModal.style.top = `${viewport.offsetTop}px`;
+            featureModal.style.width = `${viewport.width}px`;
+            featureModal.style.height = `${viewport.height}px`;
+        } else {
+            featureModal.style.removeProperty("left");
+            featureModal.style.removeProperty("top");
+            featureModal.style.removeProperty("width");
+            featureModal.style.removeProperty("height");
+        }
     }
 
     function setPanelOpen(open) {
@@ -1981,8 +2087,16 @@
         const dy = event.clientY - launcherDrag.startY;
         if (!launcherDrag.moved && Math.hypot(dx, dy) < 5) return;
         launcherDrag.moved = true;
-        const left = Math.min(window.innerWidth - launcher.offsetWidth - 8, Math.max(8, launcherDrag.left + dx));
-        const top = Math.min(window.innerHeight - launcher.offsetHeight - 8, Math.max(8, launcherDrag.top + dy));
+        const viewport = window.visualViewport;
+        const viewportLeft = viewport?.offsetLeft || 0;
+        const viewportTop = viewport?.offsetTop || 0;
+        const viewportWidth = viewport?.width || window.innerWidth;
+        const viewportHeight = viewport?.height || window.innerHeight;
+        const safeArea = window.matchMedia("(max-width: 600px)").matches
+            ? getSafeAreaInsets()
+            : { top: 0, right: 0, bottom: 0, left: 0 };
+        const left = Math.min(viewportLeft + viewportWidth - launcher.offsetWidth - Math.max(8, safeArea.right), Math.max(viewportLeft + Math.max(8, safeArea.left), launcherDrag.left + dx));
+        const top = Math.min(viewportTop + viewportHeight - launcher.offsetHeight - Math.max(8, safeArea.bottom), Math.max(viewportTop + Math.max(8, safeArea.top), launcherDrag.top + dy));
         launcher.style.left = `${left}px`;
         launcher.style.top = `${top}px`;
         launcher.style.right = "auto";
@@ -2006,9 +2120,10 @@
         setPanelOpen(!panel.classList.contains("open"));
     });
     window.addEventListener("resize", () => {
-        applyLauncherPosition();
-        positionPanelNearLauncher();
+        updateViewportMetrics();
     });
+    window.visualViewport?.addEventListener("resize", updateViewportMetrics);
+    window.visualViewport?.addEventListener("scroll", updateViewportMetrics);
 
     shadow.addEventListener("click", (event) => {
         const target = event.composedPath().find((node) =>
@@ -2193,7 +2308,7 @@
         console.error("[QOL - Digipets] gm-storage não foi carregado; confirme a instala\u00e7ão do userscript.");
     }
     state = loadState();
-    applyLauncherPosition();
+    updateViewportMetrics();
 
     const currentEpisode = location.pathname === "/estagios"
         ? Number(new URLSearchParams(location.search).get("episodio"))
