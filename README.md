@@ -91,8 +91,9 @@ Para utilizar o QOL no iPhone, é necessário instalar o aplicativo Userscripts 
 
    No iPhone, acesse:
 
-   `Ajustes → Apps → Safari → Extensões → Userscripts`
-
+   `Ajustes → Apps → Safari → Extensões → Userscripts  → Permitir`
+   `No fim tem permissões  → outros sites  →  Permitir`
+    
    Ative a extensão e conceda as permissões necessárias.
 
 5. **Acesse o jogo:**
