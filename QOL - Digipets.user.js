@@ -1,12 +1,11 @@
 // ==UserScript==
 // @name         QOL - Digipets
 // @namespace    https://digipets.net/
-// @version      1.3.11
+// @version      1.3.12
 // @description  Navegação QOL para DigiPets: bosses, Digitamas, loja, costumes, party e contadores.
 // @author       Kizano
 // @match        https://digipets.net/*
 // @run-at       document-idle
-// @require      https://unpkg.com/gm-storage@5.1.0/dist/umd/index.umd.min.js
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @noframes
@@ -23,7 +22,7 @@
     if (document.getElementById(HOST_ID)) return;
 
     const STORE_KEY = "qolDigipets.state.v1";
-    const CURRENT_VERSION = "1.3.11";
+    const CURRENT_VERSION = "1.3.12";
     const UPDATE_CHECK_KEY = "qolDigipets.updateCheck.v1";
     const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000;
     const UPDATE_CHECK_TIMEOUT = 8000;
@@ -279,6 +278,7 @@
         ])
     );
     const EPISODE_IDS = BUILT_IN_EPISODES.map(([episode]) => Number(episode));
+    const DIGITAMA_STAGE_IDS = new Set(["143", "144", "145", "146", "381"]);
     const BOSS_CATALOG = [
         ["13", "408", "60", "Pagumon", "Pagumon.gif"], ["19", "476", "60", "DemiMeramon", "DemiMeramon.gif"],
         ["24", "1030", "60", "Gazimon", "Gazimon.gif"], ["29", "1348", "60", "Kuwagamon", "Kuwagamon.gif"],
@@ -298,7 +298,7 @@
         ["127", "4545", "60", "RustTyranomon", "RustTyranomon19480.gif"], ["130", "4485", "60", "MetalEtemon", "MetalEtemon.gif"],
         ["131", "4757", "90", "Machinedramon", "Machinedramon.gif"], ["134", "4486", "60", "Ghoulmon (Black)", "Ghoulmon (Black)9966.gif"],
         ["137", "4448", "60", "Callismon", "Callismon.gif"], ["138", "4727", "90", "Piedmon", "Piedmon.gif"],
-        ["139", "5070", "180", "Apocalymon", "Apocalymon.gif"], ["381", "2184", "", "DoruGoramon", "Dorugoramon.gif"],
+        ["139", "5070", "180", "Apocalymon", "Apocalymon.gif"],
         ["240", "491", "60", "Gazimon", "Gazimon.gif"],
         ["243", "2514", "60", "RedVegiemon", "RedVegiemon.gif"], ["246", "2897", "60", "Andromon", "Andromon.gif"],
         ["249", "2299", "60", "DarkTyrannomon", "DarkTyrannomon.gif"], ["252", "3660", "60", "SkullGreymon", "SkullGreymon2.gif"],
@@ -367,11 +367,6 @@
         episodes: {}
     };
 
-    const Store = typeof GMStore === "function"
-        ? GMStore
-        : (typeof GMStorage === "object" && typeof GMStorage.GMStore === "function"
-            ? GMStorage.GMStore
-            : null);
     let store = null;
     let state = { ...STATE_DEFAULTS };
     let stateNeedsMigration = false;
@@ -420,6 +415,54 @@
     let lastSyncRequestAt = 0;
     let battleResultObserver = null;
     let battleResultCheckTimer = 0;
+    let battleResultCheckInterval = 0;
+
+    function createStore() {
+        const localKey = (key) => `${HOST_ID}:${key}`;
+        const readLocal = (key) => {
+            const serialized = window.localStorage.getItem(localKey(key));
+            if (serialized === null) return undefined;
+            try {
+                return JSON.parse(serialized);
+            } catch (error) {
+                console.error(`[QOL - Digipets] O valor local de "${key}" está inválido.`, error);
+                throw error;
+            }
+        };
+        const writeLocal = (key, value) => {
+            const serialized = JSON.stringify(value);
+            window.localStorage.setItem(localKey(key), serialized);
+            if (window.localStorage.getItem(localKey(key)) !== serialized) {
+                throw new Error("O navegador não confirmou a gravação local.");
+            }
+        };
+
+        return {
+            get(key) {
+                if (typeof GM_getValue === "function") {
+                    try {
+                        const value = GM_getValue(key);
+                        if (value !== undefined) return value;
+                    } catch (error) {
+                        console.warn("[QOL - Digipets] Armazenamento GM indisponível; tentando armazenamento local.", error);
+                    }
+                }
+                return readLocal(key);
+            },
+            set(key, value) {
+                if (typeof GM_setValue === "function" && typeof GM_getValue === "function") {
+                    try {
+                        GM_setValue(key, value);
+                        if (JSON.stringify(GM_getValue(key)) === JSON.stringify(value)) return;
+                        throw new Error("O gerenciador não confirmou a gravação GM.");
+                    } catch (error) {
+                        console.warn("[QOL - Digipets] Não foi possível gravar no armazenamento GM; usando armazenamento local.", error);
+                    }
+                }
+                writeLocal(key, value);
+            }
+        };
+    }
 
     function normalizeIds(values) {
         return Array.isArray(values)
@@ -479,7 +522,7 @@
 
     function loadState() {
         if (!store) {
-            console.error("[QOL - Digipets] gm-storage não foi carregado; as preferências não podem ser persistidas.");
+            console.error("[QOL - Digipets] O armazenamento não foi inicializado; as preferências não podem ser carregadas.");
             return { ...STATE_DEFAULTS };
         }
         try {
@@ -568,7 +611,7 @@
             return true;
         } catch (error) {
             console.error("[QOL - Digipets] Não foi possível confirmar a grava\u00e7ão.", error);
-            showToast("Falha ao salvar. Verifique as permissões do userscript.");
+            showToast(`Falha ao salvar preferências: ${error.message || "armazenamento indisponível"}.`);
             return false;
         }
     }
@@ -1089,7 +1132,9 @@
     }
 
     function bossRushOrderAfter(currentStage) {
-        const ordered = [...BOSS_CATALOG].sort((left, right) => left.order - right.order);
+        const ordered = BOSS_CATALOG
+            .filter((item) => !DIGITAMA_STAGE_IDS.has(item.stage))
+            .sort((left, right) => left.order - right.order);
         const currentIndex = ordered.findIndex((item) => item.stage === String(currentStage));
         if (currentIndex < 0) return ordered;
         return [...ordered.slice(currentIndex + 1), ...ordered.slice(0, currentIndex + 1)];
@@ -1133,26 +1178,28 @@
     function refreshBattleRushButton() {
         if (location.pathname !== "/batalha") return;
         const stage = new URLSearchParams(location.search).get("estagio") || "";
-        const isBoss = BOSS_CATALOG.some((item) => item.stage === stage);
+        const isBoss = !DIGITAMA_STAGE_IDS.has(stage)
+            && BOSS_CATALOG.some((item) => item.stage === stage);
         const existing = document.getElementById(BATTLE_RUSH_BUTTON_ID);
         if (!isBoss) {
             existing?.remove();
             return;
         }
-        if (isPageElementVisible(document.querySelector("#kf-goToNextBoss"))) {
-            existing?.remove();
-            return;
-        }
+        if (existing?.dataset.stage === stage && existing.isConnected) return;
+        existing?.remove();
+
         const repeatButton = document.querySelector("#RepetirEstagio");
-        const resultVisible = isPageElementVisible(document.querySelector("#BatalhaResultado"))
+        const resultPanel = document.querySelector("#BatalhaResultado");
+        const stageNavigation = document.querySelector("#BatalhaEstagios");
+        const resultVisible = isPageElementVisible(resultPanel)
             || (isPageElementVisible(repeatButton) && !repeatButton.disabled);
-        if (!resultVisible || existing) return;
-        const resultContainer = document.querySelector("#BatalhaEstagios")
-            || document.querySelector("#BatalhaResultado")
-            || repeatButton?.parentElement;
+        if (!resultVisible) return;
+        const resultContainer = [stageNavigation, resultPanel, repeatButton?.parentElement]
+            .find(isPageElementVisible);
         if (!resultContainer) return;
         const button = document.createElement("button");
         button.id = BATTLE_RUSH_BUTTON_ID;
+        button.dataset.stage = stage;
         button.type = "button";
         button.className = "btn btn-primary btn-flat";
         button.textContent = "⚔️ Continuar Rush Boss";
@@ -1174,21 +1221,27 @@
     }
 
     function installBattleResultObserver() {
-        if (location.pathname !== "/batalha" || !document.body || battleResultObserver) return;
+        if (location.pathname !== "/batalha" || !document.documentElement || battleResultObserver) return;
         refreshBattleRushButton();
-        battleResultObserver = new MutationObserver(() => {
+        const Observer = window.MutationObserver;
+        if (typeof Observer !== "function") {
+            console.error("[QOL - Digipets] MutationObserver indisponível; não será possível monitorar o resultado da batalha.");
+            return;
+        }
+        battleResultObserver = new Observer(() => {
             if (battleResultCheckTimer) return;
             battleResultCheckTimer = window.setTimeout(() => {
                 battleResultCheckTimer = 0;
                 refreshBattleRushButton();
             }, 180);
         });
-        battleResultObserver.observe(document.body, {
+        battleResultObserver.observe(document.documentElement, {
             childList: true,
             subtree: true,
             attributes: true,
             attributeFilter: ["class", "style", "hidden", "disabled"]
         });
+        battleResultCheckInterval = window.setInterval(refreshBattleRushButton, 1000);
     }
 
     function checkBossAlerts() {
@@ -2514,11 +2567,12 @@
     function activatePopupFilter() {
         if (!state.blockRepeatingPopups) return true;
         if (!digifarmPopupObserver) {
-            if (typeof MutationObserver !== "function" || !document.documentElement) {
+            const Observer = window.MutationObserver;
+            if (typeof Observer !== "function" || !document.documentElement) {
                 console.error("[QOL - Digipets] MutationObserver indisponível; não foi possível monitorar os popups da Digifarm.");
                 return false;
             }
-            const observer = new MutationObserver((records) => {
+            const observer = new Observer((records) => {
                 if (!state.blockRepeatingPopups) return;
                 const dialogs = new Set();
                 for (const record of records) {
@@ -2716,7 +2770,7 @@
             render();
             showToast(`${filterReady
                 ? `Bloqueio de popups ${state.blockRepeatingPopups ? "ativado" : "desativado"}.`
-                : "Não foi possível ativar o bloqueio de popups nesta página."}`
+                : "O navegador não disponibiliza o observador de página; o restante do QOL continua funcionando."}`
                 + (saved ? "" : " A preferência não foi salva."));
         } else if (action === "favorite-stage") {
             toggleFavorite(target.dataset.stage);
@@ -2782,15 +2836,7 @@
         }
     });
 
-    if (Store) {
-        try {
-            store = new Store({ strict: false });
-        } catch (error) {
-            console.error("[QOL - Digipets] Não foi possível inicializar o armazenamento.", error);
-        }
-    } else {
-        console.error("[QOL - Digipets] gm-storage não foi carregado; confirme a instala\u00e7ão do userscript.");
-    }
+    store = createStore();
     state = loadState();
     const builtInMapsChanged = seedBuiltInMaps();
     if ((builtInMapsChanged || stateNeedsMigration) && store) {
@@ -2816,7 +2862,7 @@
         }
     }
     if (state.blockRepeatingPopups && !activatePopupFilter()) {
-        showToast("Não foi possível ativar o bloqueio de popups nesta página.");
+        console.warn("[QOL - Digipets] O bloqueio de popups não foi iniciado; o restante do QOL continua funcionando.");
     }
     installBattleResultObserver();
     window.setInterval(updateCountdowns, 1000);
