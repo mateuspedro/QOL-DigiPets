@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QOL - Digipets
 // @namespace    https://digipets.net/
-// @version      1.3.10
+// @version      1.3.11
 // @description  Navegação QOL para DigiPets: bosses, Digitamas, loja, costumes, party e contadores.
 // @author       Kizano
 // @match        https://digipets.net/*
@@ -23,19 +23,262 @@
     if (document.getElementById(HOST_ID)) return;
 
     const STORE_KEY = "qolDigipets.state.v1";
-    const CURRENT_VERSION = "1.3.10";
+    const CURRENT_VERSION = "1.3.11";
     const UPDATE_CHECK_KEY = "qolDigipets.updateCheck.v1";
     const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000;
     const UPDATE_CHECK_TIMEOUT = 8000;
     const UPDATE_SOURCE_URL = "https://raw.githubusercontent.com/mateuspedro/QOL-DigiPets/main/QOL%20-%20Digipets.user.js";
     const REPOSITORY_URL = "https://github.com/mateuspedro/QOL-DigiPets";
-    const EPISODE_RANGES = [[1, 13], [26, 49], [70, 90], [94, 94], [100, 133], [138, 161]];
-    const EPISODE_EXTRA = [53];
-    const EPISODE_IDS = [...new Set([
-        ...EPISODE_RANGES.flatMap(([from, to]) =>
-            Array.from({ length: to - from + 1 }, (_, index) => from + index)),
-        ...EPISODE_EXTRA
-    ])].sort((a, b) => a - b);
+    const BUILT_IN_EPISODES = [
+        ["1", "", "9,10,11,12,13"],
+        ["2", "", "30,31,32,33,34"],
+        ["3", "24", "20,21,22,23,24"],
+        ["4", "29", "25,26,27,28,29"],
+        ["5", "39", "35,36,37,38,39"],
+        ["6", "19", "15,16,17,18,19"],
+        ["7", "44", "40,41,42,43,44"],
+        ["8", "54", "50,51,52,53,54"],
+        ["9", "64", "60,61,62,63,64"],
+        ["10", "59", "55,56,57,58,59"],
+        ["11", "49", "45,46,47,48,49"],
+        ["12", "69", "65,66,67,68,69"],
+        ["13", "72", "72"],
+        ["26", "81", "79,80,81"],
+        ["27", "86", "85,86"],
+        ["28", "89", "87,88,89"],
+        ["29", "142", "140,141,142"],
+        ["30", "92", "92"],
+        ["31", "95", "93,94,95"],
+        ["32", "98", "96,97,98"],
+        ["33", "101", "99,100,101"],
+        ["34", "104", "102,103,104"],
+        ["35", "107", "105,106,107"],
+        ["36", "110", "109,110"],
+        ["37", "113", "111,112,113"],
+        ["38", "116", "114,115,116"],
+        ["39", "117", "117"],
+        ["40", "120", "118,119,120"],
+        ["41", "123", "121,122,123"],
+        ["42", "124", "124"],
+        ["43", "127", "125,126,127"],
+        ["44", "130", "128,129,130"],
+        ["45", "131", "131"],
+        ["46", "134", "132,133,134"],
+        ["47", "137", "135,136,137"],
+        ["48", "138", "138"],
+        ["49", "139", "139"],
+        ["53", "381", "143,144,145,146,381"],
+        ["70", "240", "238,239,240"],
+        ["71", "243", "241,242,243"],
+        ["72", "246", "244,245,246"],
+        ["73", "249", "247,248,249"],
+        ["74", "252", "250,251,252"],
+        ["75", "255", "253,254,255"],
+        ["76", "258", "256,257,258"],
+        ["77", "261", "259,260,261"],
+        ["78", "264", "262,263,264"],
+        ["79", "267", "265,266,267"],
+        ["80", "270", "268,269,270"],
+        ["81", "273", "271,272,273"],
+        ["82", "277", "275,276,277"],
+        ["83", "280", "278,279,280"],
+        ["84", "283", "281,282,283"],
+        ["85", "284", "284"],
+        ["86", "287", "285,286,287"],
+        ["87", "290", "288,289,290"],
+        ["88", "293", "291,292,293"],
+        ["89", "294", "294"],
+        ["90", "295", "295"],
+        ["94", "274", "274"],
+        ["100", "308", "306,307,308"],
+        ["101", "311", "309,310,311"],
+        ["102", "314", "312,313,314"],
+        ["103", "317", "315,316,317"],
+        ["104", "320", "318,319,320"],
+        ["105", "323", "321,322,323"],
+        ["106", "324", "324"],
+        ["107", "327", "325,326,327"],
+        ["108", "330", "328,329,330"],
+        ["109", "333", "331,332,333"],
+        ["110", "336", "334,335,336"],
+        ["111", "339", "337,338,339"],
+        ["112", "342", "340,341,342"],
+        ["113", "345", "343,344,345"],
+        ["114", "348", "346,347,348"],
+        ["115", "351", "349,350,351"],
+        ["116", "354", "352,353,354"],
+        ["117", "357", "355,356,357"],
+        ["118", "360", "358,359,360"],
+        ["119", "361", "361"],
+        ["120", "362", "362"],
+        ["121", "363", "363"],
+        ["122", "364", "364"],
+        ["123", "365", "365"],
+        ["124", "366", "366"],
+        ["125", "367", "367"],
+        ["126", "368", "368"],
+        ["127", "369", "369"],
+        ["128", "370", "370"],
+        ["129", "371", "371"],
+        ["130", "372", "372"],
+        ["131", "373", "373"],
+        ["132", "374", "374"],
+        ["133", "375", "375"],
+        ["138", "399", "398,399"],
+        ["139", "402", "400,401,402"],
+        ["140", "404", "403,404"],
+        ["141", "407", "405,406,407"],
+        ["142", "409", "408,409"],
+        ["143", "412", "410,411,412"],
+        ["144", "415", "413,414,415"],
+        ["145", "418", "416,417,418"],
+        ["146", "421", "419,420,421"],
+        ["147", "424", "422,423,424"],
+        ["148", "426", "425,426"],
+        ["149", "429", "427,428,429"],
+        ["150", "432", "430,431,432"],
+        ["151", "435", "433,434,435"],
+        ["152", "438", "436,437,438"],
+        ["153", "440", "439,440"],
+        ["154", "442", "441,442"],
+        ["155", "444", "443,444"],
+        ["156", "447", "445,446,447"],
+        ["157", "449", "448,449"],
+        ["158", "451", "450,451"],
+        ["159", "454", "452,453,454"],
+        ["160", "457", "455,456,457"],
+        ["161", "458", "458"]
+    ];
+    const BUILT_IN_STAGE_DETAILS = [
+        ["13", "Pagumon", 5, 413, 1, true],
+        ["19", "DemiMeramon", 10, 476, 6, true],
+        ["24", "Gazimon", 24, 1040, 3, true],
+        ["29", "Kuwagamon", 35, 1372, 4, true],
+        ["34", "Shellmon", 35, 1372, 2, true],
+        ["39", "Seadramon", 35, 1836, 5, true],
+        ["44", "Meramon", 35, 1348, 7, true],
+        ["49", "Andromon", 45, 2312, 11, true],
+        ["54", "KyodaiNumemon", 35, 1976, 8, true],
+        ["59", "Unimon", 35, 1836, 10, true],
+        ["64", "Centarumon", 35, 1836, 9, true],
+        ["69", "Frigimon", 35, 1836, 12, true],
+        ["72", "Devimon", 40, 1832, 13, true],
+        ["81", "DarkTyrannomon", 33, 1809, 26, true],
+        ["86", "SkullGreymon", 56, 2350, 27, true],
+        ["89", "Kokatorimon", 33, 1842, 28, true],
+        ["92", "Etemon", 50, 2753, 30, true],
+        ["95", "Digitamamon", 57, 3786, 31, true],
+        ["98", "Vademon", 57, 3788, 32, true],
+        ["101", "ShogunGekomon", 57, 3786, 33, true],
+        ["104", "Tailmon", 33, 3191, 34, true],
+        ["107", "Pumpkinmon", 57, 3018, 35, true],
+        ["110", "VenomMyotismon", 70, 4369, 36, true],
+        ["113", "Whamon (Ultimate)", 57, 3785, 37, true],
+        ["116", "MarineDevimon", 57, 3785, 38, true],
+        ["117", "MetalSeadramon", 100, 4794, 39, true],
+        ["120", "Parasimon", 86, 4484, 40, true],
+        ["123", "Rosemon", 86, 4553, 41, true],
+        ["124", "Puppetmon", 100, 4729, 42, true],
+        ["127", "RustTyranomon", 86, 4545, 43, true],
+        ["130", "MetalEtemon", 86, 4552, 44, true],
+        ["131", "Machinedramon", 100, 4757, 45, true],
+        ["134", "Ghoulmon (Black)", 86, 4554, 46, true],
+        ["137", "Callismon", 86, 4381, 47, true],
+        ["138", "Piedmon", 100, 4727, 48, true],
+        ["139", "Apocalymon", 100, 5060, 49, true],
+        ["142", "Piximon", 57, 2463, 29, true],
+        ["143", "Dorimon", 5, 170, 53, false],
+        ["144", "Dorumon", 18, 446, 53, false],
+        ["145", "Dorugamon", 34, 883, 53, false],
+        ["146", "DoruGreymon", 57, 1542, 53, false],
+        ["240", "Gazimon", 23, 491, 70, true],
+        ["243", "RedVegiemon", 42, 2463, 71, true],
+        ["246", "Andromon", 45, 2898, 72, true],
+        ["249", "DarkTyrannomon", 39, 2351, 73, true],
+        ["252", "SkullGreymon", 57, 3613, 74, true],
+        ["255", "MetalGreymon (Virus)", 59, 3491, 75, true],
+        ["258", "Dragomon", 57, 3962, 76, true],
+        ["261", "ShogunGekomon", 56, 2913, 77, true],
+        ["264", "MegaSeadramon", 61, 2986, 78, true],
+        ["267", "Devimon", 42, 2357, 79, true],
+        ["270", "Piximon", 55, 2933, 80, true],
+        ["273", "Golemon", 39, 2273, 81, true],
+        ["274", "Kimeramon", 100, 4475, 94, true],
+        ["277", "Okuwamon", 61, 2953, 82, true],
+        ["280", "Arukenimon", 64, 3102, 83, true],
+        ["283", "MagnaAngemon", 59, 2932, 84, true],
+        ["284", "BlackWarGreymon", 100, 5364, 85, true],
+        ["287", "MetalMamemon", 59, 4191, 86, true],
+        ["290", "SkullMeramon", 54, 4193, 87, true],
+        ["293", "SkullSatamon", 53, 3248, 88, true],
+        ["294", "Daemon", 100, 6650, 89, true],
+        ["295", "MaloMyotismon", 100, 6804, 90, true],
+        ["308", "Chamelemon", 47, 4060, 100, true],
+        ["311", "Ogremon", 47, 2067, 101, true],
+        ["314", "Gorillamon", 37, 2764, 102, true],
+        ["317", "Devidramon", 40, 2769, 103, true],
+        ["320", "ExTyrannomon", 55, 4726, 104, true],
+        ["323", "MarineDevimon", 54, 4490, 105, true],
+        ["324", "Giromon", 63, 5291, 106, true],
+        ["327", "Mihiramon", 54, 9687, 107, true],
+        ["330", "Sandiramon", 62, 8952, 108, true],
+        ["333", "Sinduramon", 55, 9102, 109, true],
+        ["336", "Pajiramon", 59, 9027, 110, true],
+        ["339", "Vajramon", 57, 8912, 111, true],
+        ["342", "Indramon", 52, 11087, 112, true],
+        ["345", "Kumbhiramon", 61, 8994, 113, true],
+        ["348", "Vikaralamon", 63, 11339, 114, true],
+        ["351", "Majiramon", 52, 9812, 115, true],
+        ["354", "Antylamon (Virus)", 52, 10451, 116, true],
+        ["357", "Caturamon", 62, 11022, 117, true],
+        ["360", "Makuramon", 57, 10136, 118, true],
+        ["361", "Beelzemon", 85, 8369, 119, true],
+        ["362", "Baihumon", 85, 11774, 120, true],
+        ["363", "Ebonwumon", 81, 9663, 121, true],
+        ["364", "Azulongmon", 74, 9500, 122, true],
+        ["365", "Zhuqiaomon", 85, 9540, 123, true],
+        ["366", "D-Reaper ADR-01", 74, 7103, 124, true],
+        ["367", "D-Reaper ADR-02", 44, 3632, 125, true],
+        ["368", "D-Reaper ADR-03", 53, 6099, 126, true],
+        ["369", "D-Reaper ADR-04", 45, 3841, 127, true],
+        ["370", "D-Reaper ADR-05", 54, 6159, 128, true],
+        ["371", "D-Reaper ADR-06", 74, 8095, 129, true],
+        ["372", "D-Reaper ADR-07", 82, 8235, 130, true],
+        ["373", "D-Reaper ADR-08", 64, 6106, 131, true],
+        ["374", "D-Reaper ADR-09", 84, 8196, 132, true],
+        ["375", "Mother D-Reaper", 95, 11621, 133, true],
+        ["381", "DoruGoramon", 80, 2184, 53, true],
+        ["399", "Cerberumon", 61, 8589, 138, true],
+        ["402", "Raremon", 42, 3100, 139, true],
+        ["404", "Wizardmon", 41, 5598, 140, true],
+        ["407", "Woodmon", 37, 6859, 141, true],
+        ["409", "Snimon", 41, 7051, 142, true],
+        ["412", "Grumblemon", 45, 10501, 143, true],
+        ["415", "WaruMonzaemon", 59, 8974, 144, true],
+        ["418", "Gigasmon", 54, 8635, 145, true],
+        ["421", "BurningGreymon", 64, 4645, 146, true],
+        ["424", "Mercurymon", 44, 8413, 147, true],
+        ["426", "Petaldramon", 65, 9681, 148, true],
+        ["429", "Calmaramon", 63, 9452, 149, true],
+        ["432", "Petaldramon", 58, 10658, 150, true],
+        ["435", "Calmaramon", 58, 9428, 151, true],
+        ["438", "Karatenmon", 65, 9648, 152, true],
+        ["440", "Petaldramon", 61, 9527, 153, true],
+        ["442", "Duskmon", 46, 6971, 154, true],
+        ["444", "ShadowSeraphimon", 80, 9067, 155, true],
+        ["447", "Velgemon", 52, 9606, 156, true],
+        ["449", "Cherubimon (Evil)", 76, 11081, 157, true],
+        ["451", "Cherubimon (Evil)", 84, 14255, 158, true],
+        ["454", "Dynasmon", 81, 13379, 159, true],
+        ["457", "Lucemon Shadowlord Mode", 100, 23491, 160, true],
+        ["458", "Lucemon Larva", 85, 17034, 161, true]
+    ];
+    const BUILT_IN_STAGE_DETAILS_BY_ID = new Map(
+        BUILT_IN_STAGE_DETAILS.map(([stage, name, level, bp, episode, isBoss]) => [
+            stage, { stage, name, level, bp, episode, isBoss }
+        ])
+    );
+    const EPISODE_IDS = BUILT_IN_EPISODES.map(([episode]) => Number(episode));
     const BOSS_CATALOG = [
         ["13", "408", "60", "Pagumon", "Pagumon.gif"], ["19", "476", "60", "DemiMeramon", "DemiMeramon.gif"],
         ["24", "1030", "60", "Gazimon", "Gazimon.gif"], ["29", "1348", "60", "Kuwagamon", "Kuwagamon.gif"],
@@ -55,7 +298,8 @@
         ["127", "4545", "60", "RustTyranomon", "RustTyranomon19480.gif"], ["130", "4485", "60", "MetalEtemon", "MetalEtemon.gif"],
         ["131", "4757", "90", "Machinedramon", "Machinedramon.gif"], ["134", "4486", "60", "Ghoulmon (Black)", "Ghoulmon (Black)9966.gif"],
         ["137", "4448", "60", "Callismon", "Callismon.gif"], ["138", "4727", "90", "Piedmon", "Piedmon.gif"],
-        ["139", "5070", "180", "Apocalymon", "Apocalymon.gif"], ["240", "491", "60", "Gazimon", "Gazimon.gif"],
+        ["139", "5070", "180", "Apocalymon", "Apocalymon.gif"], ["381", "2184", "", "DoruGoramon", "Dorugoramon.gif"],
+        ["240", "491", "60", "Gazimon", "Gazimon.gif"],
         ["243", "2514", "60", "RedVegiemon", "RedVegiemon.gif"], ["246", "2897", "60", "Andromon", "Andromon.gif"],
         ["249", "2299", "60", "DarkTyrannomon", "DarkTyrannomon.gif"], ["252", "3660", "60", "SkullGreymon", "SkullGreymon2.gif"],
         ["255", "3440", "60", "MetalGreymon (Virus)", "MetalGreymon (Virus).gif"], ["258", "3962", "60", "Dragomon", "Dragomon.gif"],
@@ -107,7 +351,7 @@
     const DIGITAMA_SYNC_MAX_AGE = 2 * 60 * 1000;
     const BATTLE_RUSH_BUTTON_ID = "qol-rush-next-button";
     const STATE_DEFAULTS = {
-        version: 1,
+        version: 2,
         countdownSkin: true,
         blockRepeatingPopups: false,
         favoriteStages: [],
@@ -130,12 +374,15 @@
             : null);
     let store = null;
     let state = { ...STATE_DEFAULTS };
+    let stateNeedsMigration = false;
     let view = "home";
     let modalView = "";
     let syncRunning = false;
     let syncStatus = "";
     let digitamaSyncRunning = false;
     let digitamaSyncStatus = "";
+    let stageCooldownSyncRunning = false;
+    let stageCooldownRefreshStage = "";
     let importRunning = false;
     let searchQuery = "";
     let featureSearch = "";
@@ -184,12 +431,30 @@
         if (!value || typeof value !== "object" || Array.isArray(value)) {
             return { ...STATE_DEFAULTS };
         }
-        const stages = value.stages && typeof value.stages === "object" && !Array.isArray(value.stages)
+        const savedStages = value.stages && typeof value.stages === "object" && !Array.isArray(value.stages)
             ? value.stages
             : {};
-        const episodes = value.episodes && typeof value.episodes === "object" && !Array.isArray(value.episodes)
+        const savedEpisodes = value.episodes && typeof value.episodes === "object" && !Array.isArray(value.episodes)
             ? value.episodes
             : {};
+        const savedVersion = Number(value.version) || 1;
+        const stages = savedVersion >= 2
+            ? savedStages
+            : Object.fromEntries(Object.entries(savedStages).map(([stage, record]) => [
+                stage,
+                record && typeof record === "object" && !Array.isArray(record)
+                    ? { ...record, available: false, remainingKnown: false, remainingSeconds: null, expiresAt: 0, checkedAt: 0 }
+                    : record
+            ]));
+        const episodes = savedVersion >= 2
+            ? savedEpisodes
+            : Object.fromEntries(Object.entries(savedEpisodes).map(([episode, record]) => [
+                episode,
+                record && typeof record === "object" && !Array.isArray(record)
+                    ? { ...record, checkedAt: 0 }
+                    : record
+            ]));
+        if (savedVersion < 2) stateNeedsMigration = true;
         return {
             ...STATE_DEFAULTS,
             countdownSkin: value.countdownSkin !== false,
@@ -224,6 +489,69 @@
             console.error("[QOL - Digipets] Não foi possível carregar os dados salvos.", error);
             return { ...STATE_DEFAULTS };
         }
+    }
+
+    function seedBuiltInMaps() {
+        let changed = false;
+        const stageEpisodes = new Map();
+        const bossStages = new Map();
+
+        for (const [episode, bossStage, stageList] of BUILT_IN_EPISODES) {
+            const stages = stageList.split(",");
+            if (bossStage) bossStages.set(bossStage, true);
+            for (const stage of stages) stageEpisodes.set(stage, Number(episode));
+            const previous = state.episodes[episode];
+            const savedStages = Array.isArray(previous?.stages)
+                ? previous.stages.map(String).filter((stage) => /^\d+$/.test(stage))
+                : [];
+            const mergedStages = [...new Set([...stages, ...savedStages])];
+            if (!previous
+                || previous.bossStage !== bossStage
+                || JSON.stringify(previous.stages) !== JSON.stringify(mergedStages)) {
+                changed = true;
+            }
+            state.episodes[episode] = {
+                ...previous,
+                bossStage,
+                stages: mergedStages
+            };
+        }
+
+        for (const [stage, episode] of stageEpisodes) {
+            const details = BUILT_IN_STAGE_DETAILS_BY_ID.get(stage);
+            const previous = state.stages[stage] || {};
+            const previousName = typeof previous.name === "string" ? previous.name.trim() : "";
+            const name = previousName && !/^Estágio\s+\d+$/i.test(previousName)
+                ? previousName
+                : details?.name || `Estágio ${stage}`;
+            const remainingSeconds = typeof previous.remainingSeconds === "number"
+                && Number.isFinite(previous.remainingSeconds)
+                ? previous.remainingSeconds
+                : null;
+            const next = {
+                ...details,
+                ...previous,
+                stage,
+                name,
+                level: Number(previous.level) || details?.level || 0,
+                bp: Number(previous.bp) || details?.bp || 0,
+                episode: details?.episode || Number(previous.episode) || episode,
+                isBoss: Boolean(previous.isBoss || details?.isBoss || bossStages.has(stage)),
+                available: Boolean(previous.available),
+                remainingKnown: Boolean(previous.remainingKnown),
+                remainingSeconds,
+                expiresAt: Number(previous.expiresAt) || 0,
+                checkedAt: Number(previous.checkedAt) || 0
+            };
+            if (!state.stages[stage]
+                || ["name", "level", "bp", "episode", "isBoss", "available", "remainingKnown",
+                    "remainingSeconds", "expiresAt", "checkedAt"]
+                    .some((key) => state.stages[stage][key] !== next[key])) {
+                changed = true;
+            }
+            state.stages[stage] = next;
+        }
+        return changed;
     }
 
     function saveState() {
@@ -693,8 +1021,9 @@
             const remainingKnown = scriptHasTime || textSeconds !== null;
             const bossMarker = Boolean(tab.querySelector(`#Boss${tabNumber}`));
             const isBoss = bossMarker || index === tabs.length - 1;
-            const available = Boolean(startLink);
-            const blocked = Boolean(counter) || scriptSeconds > 0;
+            const available = Boolean(startLink)
+                && (!remainingKnown || remainingSeconds <= 0);
+            const blocked = !available && (Boolean(counter) || (remainingKnown && remainingSeconds > 0));
             stages.push({
                 stage,
                 episode: Number(episode),
@@ -790,7 +1119,7 @@
             window.location.href = `/estagios?episodio=${encodeURIComponent(episode)}`;
             return;
         }
-        showToast("Importe um sync ou atualize os mapas para consultar o próximo boss disponível.");
+        showToast("Não há outro boss com episódio mapeado. Atualize o userscript para receber o catálogo mais recente.");
     }
 
     function isPageElementVisible(element) {
@@ -917,6 +1246,12 @@
             const favorite = state.favoriteBosses.includes(id);
             const alert = state.bossAlerts.includes(id);
             const ignored = state.ignoredBosses.includes(id);
+            const refreshing = stageCooldownSyncRunning && stageCooldownRefreshStage === id;
+            const coolingDown = readiness.fresh && readiness.remaining !== null && readiness.remaining > 0;
+            const stageAction = readiness.ready ? "feature-start" : "refresh-stage-cooldown";
+            const stageActionText = readiness.ready
+                ? "⚔️ Começar"
+                : coolingDown ? "⏳ Em cooldown" : refreshing ? "Consultando…" : "Atualizar CD";
             const timer = !readiness.fresh
                 ? "CD desatualizado"
                 : readiness.remaining === null
@@ -930,7 +1265,7 @@
                 <div class="feature-copy"><strong>${escapeHtml(item.name || `Estágio ${id}`)}</strong>
                     <small>Estágio ${escapeHtml(id)}${item.episode ? ` · Episódio ${escapeHtml(item.episode)}` : ""}${item.bp ? ` · BP ${escapeHtml(item.bp)}` : ""} · <span class="boss-cooldown" data-expiry="${Number(state.stages[id]?.expiresAt) || 0}" data-available="${Boolean(state.stages[id]?.available)}" data-unknown="${readiness.remaining === null}" data-stale="${!readiness.fresh}" data-stage="${escapeHtml(id)}">${escapeHtml(timer)}</span></small></div>
                 <div class="feature-actions">
-                    <button class="green" type="button" data-action="feature-start" data-stage="${escapeHtml(id)}" ${readiness.ready ? "" : "disabled"}>${readiness.ready ? "⚔️ Come\u00e7ar" : readiness.fresh && readiness.remaining > 0 ? "⏳ Em cooldown" : "Atualizar CD"}</button>
+                    <button class="green" type="button" data-action="${stageAction}" data-stage="${escapeHtml(id)}" ${coolingDown || refreshing || !item.episode ? "disabled" : ""}>${stageActionText}</button>
                     <button class="${alert ? "green" : "gray"}" type="button" data-action="toggle-boss-alert" data-stage="${escapeHtml(id)}" aria-pressed="${alert}">${alert ? "🔔 Alarme ativo" : "🔕 Alarme"}</button>
                     <button class="favorite-action" type="button" data-action="toggle-boss-favorite" data-stage="${escapeHtml(id)}" aria-pressed="${favorite}"><span class="favorite-star" aria-hidden="true">★</span> ${favorite ? "Favorito" : "Favoritar"}</button>
                     ${item.episode ? `<button class="stage-map-button" type="button" data-action="open-episode" data-episode="${escapeHtml(item.episode)}">🗺️ Mapa</button>` : ""}
@@ -941,15 +1276,15 @@
         const header = isDigitama ? "Digitamas" : "Boss Rush";
         const syncNote = isDigitama
             ? "Ao abrir esta tela, o mapa de Digitamas (episódio 53) é consultado para atualizar os cooldowns."
-            : `Catálogo completo de ${items.length} bosses. Importe um sync compartilhado ou atualize os cooldowns dos episódios.`;
+            : `Catálogo completo de ${items.length} bosses. O mapeamento é integrado; atualize cada cooldown pelo jogo ou sincronize os episódios.`;
         content.innerHTML = `
             <div class="toolbar"><button class="gray" data-action="home">← Início</button><strong>${header}</strong><div class="toolbar-actions">
-                ${!isDigitama ? '<button class="green" data-action="next-boss">⚔️ Continuar Rush Boss</button><button class="gray" data-action="sync-stages" ' + (syncRunning ? "disabled" : "") + '>' + (syncRunning ? "Sync…" : "Sync mapas") + '</button>' : '<button class="green" data-action="refresh-digitamas" ' + (digitamaSyncRunning ? "disabled" : "") + '>' + (digitamaSyncRunning ? "Atualizando…" : "Atualizar CD") + '</button>'}
+                ${!isDigitama ? '<button class="green" data-action="next-boss">⚔️ Continuar Rush Boss</button><button class="gray" data-action="sync-stages" ' + (syncRunning || digitamaSyncRunning || stageCooldownSyncRunning ? "disabled" : "") + '>' + (syncRunning ? "Sync…" : "Sync mapas") + '</button>' : '<button class="green" data-action="refresh-digitamas" ' + (digitamaSyncRunning || syncRunning || stageCooldownSyncRunning ? "disabled" : "") + '>' + (digitamaSyncRunning ? "Atualizando…" : "Atualizar CD") + '</button>'}
             </div></div>
             <p class="intro">${escapeHtml(syncNote)} Os alarmes são locais e verificam os cooldowns enquanto o DigiPets está aberto.</p>
             ${!isDigitama ? '<button class="gray" type="button" data-action="show-ignored">Exibir bosses ignorados</button>' : ""}
             <input class="search" id="feature-search" type="search" placeholder="Buscar por nome ou estágio" value="${escapeHtml(featureSearch)}">
-            <div class="status" role="status">${escapeHtml(isDigitama ? (digitamaSyncStatus || featureStatus || "Consultando o mapa real para carregar cooldowns.") : (featureStatus || `${visible.length} de ${items.length} resultado(s). Cooldowns vêm dos mapas de episódio ou de um sync recente.`))}</div>
+            <div class="status" role="status">${escapeHtml(isDigitama ? (digitamaSyncStatus || featureStatus || "Consultando o mapa real para carregar cooldowns.") : (featureStatus || `${visible.length} de ${items.length} resultado(s). Use Atualizar CD ou sincronize os episódios para consultar o jogo.`))}</div>
             <div class="feature-list">${cards || '<div class="status">Nenhum resultado disponível. Verifique a pesquisa ou sincronize estágios.</div>'}</div>
         `;
         const ignoredButton = content.querySelector('[data-action="show-ignored"]');
@@ -1501,6 +1836,47 @@
         return result;
     }
 
+    async function refreshStageCooldown(stageId) {
+        if (syncRunning || digitamaSyncRunning || stageCooldownSyncRunning) {
+            showToast("Já existe uma consulta de cooldown em andamento. Aguarde ela terminar.");
+            return;
+        }
+        const episode = getEpisodeForStage(stageId);
+        if (!EPISODE_IDS.includes(episode)) {
+            showToast("Não foi possível localizar o episódio deste estágio no mapa integrado.");
+            return;
+        }
+        if (!isSafeSyncPage()) {
+            showToast("Consulte o cooldown fora da batalha e das páginas de coleta.");
+            return;
+        }
+
+        stageCooldownSyncRunning = true;
+        stageCooldownRefreshStage = String(stageId);
+        featureStatus = `Consultando o cooldown do estágio ${stageId} no episódio ${episode}…`;
+        render();
+        await waitForSyncGap();
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+        lastSyncRequestAt = Date.now();
+        try {
+            await fetchEpisode(episode, controller.signal);
+            saveState();
+            featureStatus = `Cooldown atualizado pelo jogo · episódio ${episode}.`;
+            showToast(featureStatus);
+        } catch (error) {
+            const message = error?.name === "AbortError" ? "tempo esgotado" : (error?.message || "falha inesperada");
+            console.error(`[QOL - Digipets] Não foi possível atualizar o cooldown do estágio ${stageId}.`, error);
+            featureStatus = `Falha ao consultar o estágio ${stageId}: ${message}.`;
+            showToast(featureStatus);
+        } finally {
+            clearTimeout(timeout);
+            stageCooldownSyncRunning = false;
+            stageCooldownRefreshStage = "";
+            if (panel.classList.contains("open")) render();
+        }
+    }
+
     function getCoverage() {
         return EPISODE_IDS.filter((episode) => state.episodes[String(episode)]).length;
     }
@@ -1531,12 +1907,23 @@
             const stageCard = element.closest(".stage-card");
             const featureCard = element.closest(".feature-card");
             const start = stageCard?.querySelector('[data-action="start-stage"]')
-                || featureCard?.querySelector('[data-action="feature-start"]');
+                || featureCard?.querySelector('[data-action="feature-start"], [data-action="refresh-stage-cooldown"]');
             if (start) {
-                start.disabled = !available;
-                start.textContent = available
-                    ? (featureCard ? "⚔️ Come\u00e7ar" : "⚔️ Entrar")
-                    : stale || unknown ? "CD n/d" : "⏳ Em cooldown";
+                if (featureCard) {
+                    const canRefresh = stale || unknown;
+                    const refreshing = stageCooldownSyncRunning
+                        && stageCooldownRefreshStage === element.dataset.stage;
+                    start.dataset.action = canRefresh ? "refresh-stage-cooldown" : "feature-start";
+                    start.disabled = canRefresh ? refreshing : !available;
+                    start.textContent = available
+                        ? "⚔️ Come\u00e7ar"
+                        : canRefresh ? refreshing ? "Consultando…" : "Atualizar CD" : "⏳ Em cooldown";
+                } else {
+                    start.disabled = !available;
+                    start.textContent = available
+                        ? "⚔️ Entrar"
+                        : stale || unknown ? "CD n/d" : "⏳ Em cooldown";
+                }
             }
         }
     }
@@ -1556,9 +1943,9 @@
             <div class="toolbar"><button class="gray" data-action="home">← Início</button><strong>Mapas e estágios</strong><div class="toolbar-actions">
                 <button class="gray" data-action="import-sync">⬆ Importar sync</button>
                 <button class="gray" data-action="export-sync" ${Object.keys(state.episodes).length ? "" : "disabled"}>⬇ Exportar</button>
-                <button class="green" data-action="sync-stages" ${syncRunning ? "disabled" : ""}>${syncRunning ? "Sincronizando…" : "Atualizar mapas"}</button>
+                <button class="green" data-action="sync-stages" ${syncRunning || digitamaSyncRunning || stageCooldownSyncRunning ? "disabled" : ""}>${syncRunning ? "Sincronizando…" : "Atualizar mapas"}</button>
             </div></div>
-            <p class="intro">O sync compartilhado preenche episódios e estágios; cooldowns só são aceitos se a captura tiver menos de 6 horas. Use <b>Mapa</b> para consultar o tempo atual no jogo.</p>
+            <p class="intro">O mapeamento de episódios e estágios já vem integrado. Use <b>Mapa</b> para consultar o jogo e atualizar os cooldowns; importar um sync é opcional.</p>
             <input class="search" id="stage-search" type="search" placeholder="Buscar por nome, estágio ou episódio" value="${escapeHtml(searchQuery)}">
             <div class="status" role="status">${escapeHtml(syncStatus || `${stages.length} estágio(s) · ${getCoverage()}/${EPISODE_IDS.length} episódios mapeados.`)}</div>
             <div class="stage-list">${stages.length ? stages.map((stage) => {
@@ -1578,7 +1965,7 @@
                         <button class="green" type="button" data-action="start-stage" data-stage="${escapeHtml(stageId)}" ${available ? "" : "disabled"}>${available ? "⚔️ Entrar" : fresh && stage.remainingKnown ? "Em cooldown" : "CD n/d"}</button>
                     </div>
                 </article>`;
-            }).join("") : '<div class="status">Ainda não há mapas conhecidos. Importe um sync compartilhado ou atualize os episódios em Configura\u00e7ões.</div>'}</div>
+            }).join("") : '<div class="status">O mapa integrado ainda não contém estágios. Atualize o userscript e tente novamente.</div>'}</div>
         `;
     }
 
@@ -1595,11 +1982,11 @@
                 <button class="switch ${state.blockRepeatingPopups ? "green" : "gray"}" type="button" role="switch" aria-checked="${state.blockRepeatingPopups}" data-action="toggle-popups">${popupState}</button>
             </div>
             <div class="config-row">
-                <div class="config-copy"><strong>Sincronizar estágios</strong><small>Lê até ${SYNC_BATCH_SIZE} episódios por execu\u00e7ão, com intervalo entre pedidos. Execute novamente para continuar a cobertura de ${EPISODE_IDS.length} episódios.</small></div>
-                <button class="green" type="button" data-action="sync-stages" ${syncRunning ? "disabled" : ""}>${syncRunning ? "Sincronizando…" : "Atualizar mapas"}</button>
+                <div class="config-copy"><strong>Sincronizar estágios</strong><small>O mapeamento já vem integrado. Consulta até ${SYNC_BATCH_SIZE} episódios por execu\u00e7ão, com intervalo entre pedidos; execute novamente para atualizar o restante.</small></div>
+                <button class="green" type="button" data-action="sync-stages" ${syncRunning || digitamaSyncRunning || stageCooldownSyncRunning ? "disabled" : ""}>${syncRunning ? "Sincronizando…" : "Atualizar mapas"}</button>
             </div>
             <section class="config-row sync-config">
-                <div class="config-copy"><strong>Compartilhar sync</strong><small>Importa o mapa de episódios/estágios do JSON de sync. Cooldowns antigos são ignorados; só timers capturados nas últimas 6 horas são usados.</small></div>
+                <div class="config-copy"><strong>Sync opcional</strong><small>Importe ou exporte um JSON para compartilhar dados. O mapa necessário para navegação e cooldowns já está integrado ao userscript.</small></div>
                 <div class="sync-tools">
                     <button class="gray" type="button" data-action="import-sync" ${importRunning ? "disabled" : ""}>⬆ Importar sync</button>
                     <button class="gray" type="button" data-action="export-sync" ${Object.keys(state.episodes).length ? "" : "disabled"}>⬇ Exportar sync</button>
@@ -1765,6 +2152,10 @@
 
     async function syncStages() {
         if (syncRunning) return;
+        if (digitamaSyncRunning || stageCooldownSyncRunning) {
+            showToast("Aguarde a consulta de cooldown em andamento antes de sincronizar os mapas.");
+            return;
+        }
         if (!isSafeSyncPage()) {
             showToast("A sincroniza\u00e7ão está disponível fora da batalha e das páginas de coleta.");
             return;
@@ -1813,7 +2204,7 @@
             render();
             return;
         }
-        if (syncRunning) {
+        if (syncRunning || stageCooldownSyncRunning) {
             digitamaSyncStatus = "A sincroniza\u00e7ão geral já está consultando episódios; aguarde a rodada.";
             render();
             return;
@@ -2018,7 +2409,7 @@
             episodes[String(episode)] = { bossStage: String(record.bossStage || stages.at(-1)), stages };
         }
         if (!Object.keys(episodes).length) {
-            showToast("Ainda não há mapas para exportar. Importe um sync ou atualize alguns episódios.");
+            showToast("O mapa integrado ainda não contém episódios para exportar.");
             return;
         }
         const stages = {};
@@ -2240,7 +2631,7 @@
         else if (action === "open-episode") {
             const episode = Number(target.dataset.episode);
             if (!EPISODE_IDS.includes(episode)) {
-                showToast("Este estágio ainda não tem episódio mapeado. Importe um sync ou atualize os mapas.");
+                showToast("Este estágio não tem um episódio reconhecido no mapa integrado.");
                 return;
             }
             window.location.href = `/estagios?episodio=${encodeURIComponent(episode)}`;
@@ -2298,10 +2689,13 @@
         else if (action === "feature-start") {
             const id = String(target.dataset.stage || "");
             if (!/^\d+$/.test(id) || !stageReadiness(id).ready) {
-                showToast("Sincronize este estágio e confirme que ele está disponível.");
+                showToast("Atualize o cooldown deste estágio e confirme que ele está disponível.");
                 return;
             }
             window.location.href = `/batalha?estagio=${encodeURIComponent(id)}#DP`;
+        }
+        else if (action === "refresh-stage-cooldown") {
+            void refreshStageCooldown(String(target.dataset.stage || ""));
         }
         else if (action === "sync-stages") void syncStages();
         else if (action === "toggle-countdown-skin") {
@@ -2398,6 +2792,11 @@
         console.error("[QOL - Digipets] gm-storage não foi carregado; confirme a instala\u00e7ão do userscript.");
     }
     state = loadState();
+    const builtInMapsChanged = seedBuiltInMaps();
+    if ((builtInMapsChanged || stateNeedsMigration) && store) {
+        saveState();
+        stateNeedsMigration = false;
+    }
     void checkForUpdate(true);
     window.setInterval(() => void checkForUpdate(), UPDATE_CHECK_INTERVAL);
     updateViewportMetrics();
