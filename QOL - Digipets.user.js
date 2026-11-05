@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QOL - Digipets
 // @namespace    https://digipets.net/
-// @version      1.3.12
+// @version      1.3.13
 // @description  Navegação QOL para DigiPets: bosses, Digitamas, loja, costumes, party e contadores.
 // @author       Kizano
 // @match        https://digipets.net/*
@@ -22,7 +22,7 @@
     if (document.getElementById(HOST_ID)) return;
 
     const STORE_KEY = "qolDigipets.state.v1";
-    const CURRENT_VERSION = "1.3.12";
+    const CURRENT_VERSION = "1.3.13";
     const UPDATE_CHECK_KEY = "qolDigipets.updateCheck.v1";
     const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000;
     const UPDATE_CHECK_TIMEOUT = 8000;
@@ -349,6 +349,8 @@
     const SYNC_COOLDOWN_TTL = 6 * 60 * 60 * 1000;
     const STAGE_FRESH_MS = 6 * 60 * 60 * 1000;
     const DIGITAMA_SYNC_MAX_AGE = 2 * 60 * 1000;
+    const BOSS_RUSH_EPISODE_CACHE_MS = 2 * 60 * 1000;
+    const BOSS_RUSH_MAX_REFRESHES = 20;
     const BATTLE_RUSH_BUTTON_ID = "qol-rush-next-button";
     const STATE_DEFAULTS = {
         version: 2,
@@ -410,6 +412,7 @@
     let digifarmPopupObserver = null;
     const handledDigifarmDialogs = new WeakSet();
     let updateCheckRunning = false;
+    let bossRushAdvanceRunning = false;
     let saveTimer = 0;
     let toastTimer = 0;
     let lastSyncRequestAt = 0;
@@ -637,7 +640,7 @@
             #panel.open { display: flex; }
             .header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 48px; padding: 8px 11px; background: linear-gradient(110deg,#25144c,#124d80 62%,#087e88); color: white; }
             .header strong { flex: 1; font-size: 14px; }
-            .update-notice { position: relative; display: inline-flex; min-width: 40px; min-height: 40px; align-items: center; justify-content: center; gap: 5px; padding: 6px 9px; border: 1px solid #ffe083; border-radius: 9px; background: linear-gradient(135deg,#604817,#47333d); color: #ffe083; font: 700 11px Arial,sans-serif; text-decoration: none; box-shadow: 0 3px 9px #020b1a66; }
+            .update-notice { position: relative; display: inline-flex; min-width: 40px; min-height: 40px; flex: 0 0 auto; align-items: center; justify-content: center; gap: 5px; padding: 6px 9px; border: 1px solid #ffe083; border-radius: 9px; background: linear-gradient(135deg,#785315,#a94632); color: #fff3bd; font: 700 11px/1.2 Arial,sans-serif; text-align: center; text-decoration: none; box-shadow: 0 3px 9px #020b1a66,0 0 10px #ffc14c55; }
             .update-notice[hidden] { display: none; }
             .update-notice:hover { filter: brightness(1.13); }
             .update-icon { font-size: 16px; line-height: 1; }
@@ -855,8 +858,9 @@
                 .shop-pager button { min-height: 44px; }
                 .header { min-height: 52px; padding: 6px 8px 6px 12px; }
                 .header button { width: 44px; height: 44px; padding: 0; font-size: 20px; }
-                .update-notice { width: 44px; min-height: 44px; padding: 6px; }
-                .update-notice > span:not(.update-icon) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; }
+                .header strong { min-width: 0; font-size: 12px; }
+                .update-notice { width: auto; min-width: 0; max-width: 145px; min-height: 44px; flex: 0 1 auto; gap: 3px; padding: 6px 8px; font-size: 10px; }
+                .update-badge { position: static; flex: 0 0 auto; margin-left: 2px; padding: 2px 4px; font-size: 8px; }
                 .home-link { min-height: 58px; padding: 12px; }
                 .config-row { align-items: flex-start; }
                 .switch { min-height: 44px; }
@@ -877,7 +881,7 @@
         </style>
         <button id="launcher" type="button" aria-expanded="false">✦ QOL - Digipets</button>
         <section id="panel" role="dialog" aria-label="QOL - Digipets">
-            <header class="header"><strong>✦ QOL - Digipets</strong><a id="update-notice" class="update-notice" href="${REPOSITORY_URL}" target="_blank" rel="noopener noreferrer" aria-label="Nova versão disponível. Abrir repositório no GitHub." title="Nova versão disponível — abrir repositório no GitHub" hidden><span class="update-icon" aria-hidden="true">⬆</span><span>Atualização</span><span class="update-badge">NOVA</span></a><button type="button" class="gray" data-action="close" aria-label="Fechar">×</button></header>
+            <header class="header"><strong>✦ QOL - Digipets</strong><a id="update-notice" class="update-notice" href="${REPOSITORY_URL}" target="_blank" rel="noopener noreferrer" aria-label="Nova versão disponível. Abrir repositório no GitHub." title="Nova versão disponível — abrir repositório no GitHub" hidden><span class="update-icon" aria-hidden="true">⬆</span><span class="update-label">Atualização</span><span class="update-badge">NOVA</span></a><button type="button" class="gray" data-action="close" aria-label="Fechar">×</button></header>
             <main class="content" id="content"></main>
             <footer class="panel-footer"><strong>Criado por Kizano</strong><small>Para mais dicas, contacte-me pelo jogo: Kizano (ID #4019)</small></footer>
         </section>
@@ -932,6 +936,7 @@
         const hasUpdate = Boolean(version);
         updateNotice.hidden = !hasUpdate;
         if (hasUpdate) {
+            updateNotice.querySelector(".update-label").textContent = `Nova versão ${version}`;
             updateNotice.title = `Versão ${version} disponível — abrir repositório no GitHub`;
             updateNotice.setAttribute("aria-label", `Versão ${version} disponível. Abrir repositório no GitHub.`);
         }
@@ -1148,23 +1153,144 @@
         return match ? Number(match[0]) : 0;
     }
 
-    function continueBossRush(currentStage = "") {
-        const ordered = bossRushOrderAfter(String(currentStage || ""));
-        const nextReady = ordered.find((item) =>
-            !state.ignoredBosses.includes(item.stage) && stageReadiness(item.stage).ready);
-        if (nextReady) {
-            window.location.href = `/batalha?estagio=${encodeURIComponent(nextReady.stage)}#DP`;
+    function setBossRushAdvanceBusy(busy) {
+        const panelButton = shadow.querySelector('[data-action="next-boss"]');
+        if (panelButton) {
+            panelButton.disabled = busy;
+            panelButton.textContent = busy ? "Consultando cooldowns…" : "⚔️ Continuar Rush Boss";
+        }
+        const battleButton = document.getElementById(BATTLE_RUSH_BUTTON_ID);
+        if (battleButton) {
+            battleButton.disabled = busy;
+            battleButton.textContent = busy ? "Consultando cooldowns…" : "⚔️ Continuar Rush Boss";
+        }
+    }
+
+    async function continueBossRush(currentStage = "") {
+        if (bossRushAdvanceRunning) {
+            showToast("A consulta do próximo boss já está em andamento.");
             return;
         }
-        const nextMapped = ordered.find((item) =>
-            !state.ignoredBosses.includes(item.stage) && getEpisodeForStage(item.stage));
-        const episode = nextMapped ? getEpisodeForStage(nextMapped.stage) : 0;
-        if (episode) {
-            showToast(`Ainda não há cooldown recente para liberar outro boss. Abrindo o mapa do episódio ${episode}.`);
-            window.location.href = `/estagios?episodio=${encodeURIComponent(episode)}`;
+        const battleStage = location.pathname === "/batalha"
+            ? new URLSearchParams(location.search).get("estagio") || ""
+            : "";
+        const originStage = String(currentStage || battleStage);
+        const currentEpisode = originStage ? getEpisodeForStage(originStage) : 0;
+        const ordered = bossRushOrderAfter(originStage)
+            .filter((item) => !state.ignoredBosses.includes(item.stage));
+        const episodes = new Map();
+        for (const item of ordered) {
+            const episode = getEpisodeForStage(item.stage);
+            if (!EPISODE_IDS.includes(episode)) continue;
+            if (!episodes.has(episode)) episodes.set(episode, []);
+            episodes.get(episode).push(item);
+        }
+        if (!episodes.size) {
+            showToast("Não há bosses com episódios mapeados para continuar o Rush.");
             return;
         }
-        showToast("Não há outro boss com episódio mapeado. Atualize o userscript para receber o catálogo mais recente.");
+
+        bossRushAdvanceRunning = true;
+        setBossRushAdvanceBusy(true);
+        featureStatus = "Consultando cooldowns no jogo para localizar o próximo boss disponível…";
+        if (panel.classList.contains("open") && view === "bosses" && !modalView) render();
+
+        let refreshedEpisodes = 0;
+        const failures = [];
+        const verifiedEpisodes = new Set();
+        const verifiedStageIds = new Set();
+        const episodeDataIsRecent = (episode, bosses) => {
+            const checkedAt = Number(state.episodes[String(episode)]?.checkedAt) || 0;
+            const age = Date.now() - checkedAt;
+            return checkedAt > 0
+                && age >= 0
+                && age < BOSS_RUSH_EPISODE_CACHE_MS
+                && bosses.every((item) => {
+                    const record = state.stages[item.stage];
+                    const stageAge = Date.now() - Number(record?.checkedAt || 0);
+                    return Number(record?.episode) === episode
+                        && stageAge >= 0
+                        && stageAge < BOSS_RUSH_EPISODE_CACHE_MS;
+                });
+        };
+        try {
+            for (const [episode, bosses] of episodes) {
+                const recentlyChecked = episodeDataIsRecent(episode, bosses)
+                    && episode !== currentEpisode;
+                let episodeVerified = recentlyChecked;
+                if (!recentlyChecked) {
+                    if (refreshedEpisodes >= BOSS_RUSH_MAX_REFRESHES) {
+                        const message = `Verificados ${refreshedEpisodes} episódios. Toque novamente em “Continuar Rush Boss” para consultar os próximos.`;
+                        featureStatus = message;
+                        showToast(message);
+                        return;
+                    }
+                    featureStatus = `Verificando cooldowns: episódio ${episode} (${refreshedEpisodes + 1}/${BOSS_RUSH_MAX_REFRESHES})…`;
+                    if (panel.classList.contains("open") && view === "bosses" && !modalView) render();
+                    await waitForSyncGap();
+                    const controller = new AbortController();
+                    const timeout = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+                    lastSyncRequestAt = Date.now();
+                    try {
+                        const result = await fetchEpisode(episode, controller.signal);
+                        saveState();
+                        refreshedEpisodes += 1;
+                        const returnedStages = new Set(result.stages.map((stage) => String(stage.stage)));
+                        for (const item of bosses) {
+                            if (returnedStages.has(item.stage)) verifiedStageIds.add(item.stage);
+                        }
+                        episodeVerified = bosses.some((item) => verifiedStageIds.has(item.stage));
+                    } catch (error) {
+                        const message = error?.name === "AbortError" ? "tempo esgotado" : (error?.message || "falha inesperada");
+                        failures.push({ episode, message });
+                        console.error(`[QOL - Digipets] Não foi possível consultar o episódio ${episode} para o Boss Rush.`, error);
+                    } finally {
+                        clearTimeout(timeout);
+                    }
+                } else {
+                    for (const item of bosses) verifiedStageIds.add(item.stage);
+                }
+
+                if (!episodeVerified) continue;
+                verifiedEpisodes.add(episode);
+                const nextReady = bosses.find((item) =>
+                    verifiedStageIds.has(item.stage) && stageReadiness(item.stage).ready);
+                if (nextReady) {
+                    saveState();
+                    featureStatus = `${nextReady.name} está disponível. Abrindo o estágio ${nextReady.stage}…`;
+                    window.location.href = `/batalha?estagio=${encodeURIComponent(nextReady.stage)}#DP`;
+                    return;
+                }
+            }
+
+            const nearestCooldown = ordered
+                .map((item) => ({
+                    item,
+                    episode: getEpisodeForStage(item.stage),
+                    readiness: stageReadiness(item.stage)
+                }))
+                .filter(({ item, episode }) =>
+                    verifiedEpisodes.has(episode) && verifiedStageIds.has(item.stage))
+                .filter(({ readiness }) => readiness.fresh && readiness.remaining > 0)
+                .sort((left, right) => left.readiness.remaining - right.readiness.remaining)[0];
+            const hasUnverifiedEpisodes = Array.from(episodes.entries()).some(([episode, bosses]) =>
+                !bosses.every((item) => verifiedStageIds.has(item.stage))
+                || !verifiedEpisodes.has(episode));
+            if (hasUnverifiedEpisodes) {
+                featureStatus = "Ainda há episódios sem consulta recente. Toque novamente em “Continuar Rush Boss” para continuar a verificação.";
+            } else if (nearestCooldown) {
+                featureStatus = `Nenhum boss disponível. Mais próximo: ${nearestCooldown.item.name} · ${formatRemaining(nearestCooldown.readiness.remaining)}.`;
+            } else if (failures.length) {
+                featureStatus = `Não foi possível confirmar a disponibilidade de ${failures.length} episódio(s). Tente novamente com a página do jogo carregada.`;
+            } else {
+                featureStatus = "Nenhum boss disponível foi encontrado nos episódios consultados.";
+            }
+            showToast(featureStatus);
+        } finally {
+            bossRushAdvanceRunning = false;
+            setBossRushAdvanceBusy(false);
+            if (panel.classList.contains("open") && view === "bosses" && !modalView) render();
+        }
     }
 
     function isPageElementVisible(element) {
@@ -1202,7 +1328,8 @@
         button.dataset.stage = stage;
         button.type = "button";
         button.className = "btn btn-primary btn-flat";
-        button.textContent = "⚔️ Continuar Rush Boss";
+        button.textContent = bossRushAdvanceRunning ? "Consultando cooldowns…" : "⚔️ Continuar Rush Boss";
+        button.disabled = bossRushAdvanceRunning;
         Object.assign(button.style, {
             margin: "10px 0 10px 8px",
             padding: "11px 18px",
@@ -1306,7 +1433,7 @@
                 ? "⚔️ Começar"
                 : coolingDown ? "⏳ Em cooldown" : refreshing ? "Consultando…" : "Atualizar CD";
             const timer = !readiness.fresh
-                ? "CD desatualizado"
+                ? (item.cooldown ? `CD atual n/d · catálogo ${item.cooldown} min` : "CD atual n/d")
                 : readiness.remaining === null
                     ? "Cooldown desconhecido"
                 : readiness.remaining > 0 ? formatRemaining(readiness.remaining) : "Disponível";
@@ -1316,7 +1443,7 @@
             return `<article class="feature-card">
                 ${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="">` : '<span aria-hidden="true">🐉</span>'}
                 <div class="feature-copy"><strong>${escapeHtml(item.name || `Estágio ${id}`)}</strong>
-                    <small>Estágio ${escapeHtml(id)}${item.episode ? ` · Episódio ${escapeHtml(item.episode)}` : ""}${item.bp ? ` · BP ${escapeHtml(item.bp)}` : ""} · <span class="boss-cooldown" data-expiry="${Number(state.stages[id]?.expiresAt) || 0}" data-available="${Boolean(state.stages[id]?.available)}" data-unknown="${readiness.remaining === null}" data-stale="${!readiness.fresh}" data-stage="${escapeHtml(id)}">${escapeHtml(timer)}</span></small></div>
+                    <small>Estágio ${escapeHtml(id)}${item.episode ? ` · Episódio ${escapeHtml(item.episode)}` : ""}${item.bp ? ` · BP ${escapeHtml(item.bp)}` : ""}${!isDigitama && item.cooldown ? ` · CD cadastrado ${escapeHtml(item.cooldown)} min` : ""} · <span class="boss-cooldown" data-expiry="${Number(state.stages[id]?.expiresAt) || 0}" data-available="${Boolean(state.stages[id]?.available)}" data-unknown="${readiness.remaining === null}" data-stale="${!readiness.fresh}" data-stale-label="${escapeHtml(!isDigitama && item.cooldown ? `CD atual n/d · catálogo ${item.cooldown} min` : "CD desatualizado")}" data-stage="${escapeHtml(id)}">${escapeHtml(timer)}</span></small></div>
                 <div class="feature-actions">
                     <button class="green" type="button" data-action="${stageAction}" data-stage="${escapeHtml(id)}" ${coolingDown || refreshing || !item.episode ? "disabled" : ""}>${stageActionText}</button>
                     <button class="${alert ? "green" : "gray"}" type="button" data-action="toggle-boss-alert" data-stage="${escapeHtml(id)}" aria-pressed="${alert}">${alert ? "🔔 Alarme ativo" : "🔕 Alarme"}</button>
@@ -1332,7 +1459,7 @@
             : `Catálogo completo de ${items.length} bosses. O mapeamento é integrado; atualize cada cooldown pelo jogo ou sincronize os episódios.`;
         content.innerHTML = `
             <div class="toolbar"><button class="gray" data-action="home">← Início</button><strong>${header}</strong><div class="toolbar-actions">
-                ${!isDigitama ? '<button class="green" data-action="next-boss">⚔️ Continuar Rush Boss</button><button class="gray" data-action="sync-stages" ' + (syncRunning || digitamaSyncRunning || stageCooldownSyncRunning ? "disabled" : "") + '>' + (syncRunning ? "Sync…" : "Sync mapas") + '</button>' : '<button class="green" data-action="refresh-digitamas" ' + (digitamaSyncRunning || syncRunning || stageCooldownSyncRunning ? "disabled" : "") + '>' + (digitamaSyncRunning ? "Atualizando…" : "Atualizar CD") + '</button>'}
+                ${!isDigitama ? '<button class="green" data-action="next-boss" ' + (bossRushAdvanceRunning ? "disabled" : "") + '>' + (bossRushAdvanceRunning ? "Consultando cooldowns…" : "⚔️ Continuar Rush Boss") + '</button><button class="gray" data-action="sync-stages" ' + (syncRunning || digitamaSyncRunning || stageCooldownSyncRunning ? "disabled" : "") + '>' + (syncRunning ? "Sync…" : "Sync mapas") + '</button>' : '<button class="green" data-action="refresh-digitamas" ' + (digitamaSyncRunning || syncRunning || stageCooldownSyncRunning ? "disabled" : "") + '>' + (digitamaSyncRunning ? "Atualizando…" : "Atualizar CD") + '</button>'}
             </div></div>
             <p class="intro">${escapeHtml(syncNote)} Os alarmes são locais e verificam os cooldowns enquanto o DigiPets está aberto.</p>
             ${!isDigitama ? '<button class="gray" type="button" data-action="show-ignored">Exibir bosses ignorados</button>' : ""}
@@ -1956,7 +2083,9 @@
             const unknown = element.dataset.unknown === "true";
             const stale = element.dataset.stale === "true";
             const available = !unknown && !stale && (element.dataset.available === "true" || remaining <= 0);
-            element.textContent = stale ? "CD não atualizado" : unknown ? "CD n/d" : formatRemaining(remaining);
+            element.textContent = stale
+                ? (element.dataset.staleLabel || "CD não atualizado")
+                : unknown ? "CD n/d" : formatRemaining(remaining);
             const stageCard = element.closest(".stage-card");
             const featureCard = element.closest(".feature-card");
             const start = stageCard?.querySelector('[data-action="start-stage"]')
@@ -2737,9 +2866,7 @@
         else if (action === "toggle-boss-ignore") toggleSavedArray("ignoredBosses", target.dataset.stage);
         else if (action === "toggle-boss-alert") toggleSavedArray("bossAlerts", target.dataset.stage);
         else if (action === "show-ignored") { showIgnoredBosses = !showIgnoredBosses; render(); }
-        else if (action === "next-boss") {
-            continueBossRush("");
-        }
+        else if (action === "next-boss") void continueBossRush();
         else if (action === "feature-start") {
             const id = String(target.dataset.stage || "");
             if (!/^\d+$/.test(id) || !stageReadiness(id).ready) {
