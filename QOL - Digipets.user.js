@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QOL - Digipets
 // @namespace    https://digipets.net/
-// @version      1.3.13
+// @version      1.3.14
 // @description  Navegação QOL para DigiPets: bosses, Digitamas, loja, costumes, party e contadores.
 // @author       Kizano
 // @match        https://digipets.net/*
@@ -22,7 +22,7 @@
     if (document.getElementById(HOST_ID)) return;
 
     const STORE_KEY = "qolDigipets.state.v1";
-    const CURRENT_VERSION = "1.3.13";
+    const CURRENT_VERSION = "1.3.14";
     const UPDATE_CHECK_KEY = "qolDigipets.updateCheck.v1";
     const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000;
     const UPDATE_CHECK_TIMEOUT = 8000;
@@ -349,8 +349,6 @@
     const SYNC_COOLDOWN_TTL = 6 * 60 * 60 * 1000;
     const STAGE_FRESH_MS = 6 * 60 * 60 * 1000;
     const DIGITAMA_SYNC_MAX_AGE = 2 * 60 * 1000;
-    const BOSS_RUSH_EPISODE_CACHE_MS = 2 * 60 * 1000;
-    const BOSS_RUSH_MAX_REFRESHES = 20;
     const BATTLE_RUSH_BUTTON_ID = "qol-rush-next-button";
     const STATE_DEFAULTS = {
         version: 2,
@@ -1070,6 +1068,7 @@
             const bossMarker = Boolean(tab.querySelector(`#Boss${tabNumber}`));
             const isBoss = bossMarker || index === tabs.length - 1;
             const available = Boolean(startLink)
+                && !counter
                 && (!remainingKnown || remainingSeconds <= 0);
             const blocked = !available && (Boolean(counter) || (remainingKnown && remainingSeconds > 0));
             stages.push({
@@ -1175,7 +1174,6 @@
             ? new URLSearchParams(location.search).get("estagio") || ""
             : "";
         const originStage = String(currentStage || battleStage);
-        const currentEpisode = originStage ? getEpisodeForStage(originStage) : 0;
         const ordered = bossRushOrderAfter(originStage)
             .filter((item) => !state.ignoredBosses.includes(item.stage));
         const episodes = new Map();
@@ -1199,60 +1197,33 @@
         const failures = [];
         const verifiedEpisodes = new Set();
         const verifiedStageIds = new Set();
-        const episodeDataIsRecent = (episode, bosses) => {
-            const checkedAt = Number(state.episodes[String(episode)]?.checkedAt) || 0;
-            const age = Date.now() - checkedAt;
-            return checkedAt > 0
-                && age >= 0
-                && age < BOSS_RUSH_EPISODE_CACHE_MS
-                && bosses.every((item) => {
-                    const record = state.stages[item.stage];
-                    const stageAge = Date.now() - Number(record?.checkedAt || 0);
-                    return Number(record?.episode) === episode
-                        && stageAge >= 0
-                        && stageAge < BOSS_RUSH_EPISODE_CACHE_MS;
-                });
-        };
         try {
             for (const [episode, bosses] of episodes) {
-                const recentlyChecked = episodeDataIsRecent(episode, bosses)
-                    && episode !== currentEpisode;
-                let episodeVerified = recentlyChecked;
-                if (!recentlyChecked) {
-                    if (refreshedEpisodes >= BOSS_RUSH_MAX_REFRESHES) {
-                        const message = `Verificados ${refreshedEpisodes} episódios. Toque novamente em “Continuar Rush Boss” para consultar os próximos.`;
-                        featureStatus = message;
-                        showToast(message);
-                        return;
+                refreshedEpisodes += 1;
+                featureStatus = `Sincronizando cooldowns: episódio ${episode} (${refreshedEpisodes}/${episodes.size})…`;
+                if (panel.classList.contains("open") && view === "bosses" && !modalView) render();
+                await waitForSyncGap();
+                const controller = new AbortController();
+                const timeout = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+                lastSyncRequestAt = Date.now();
+                try {
+                    const result = await fetchEpisode(episode, controller.signal);
+                    saveState();
+                    const returnedStages = new Set(result.stages.map((stage) => String(stage.stage)));
+                    for (const item of bosses) {
+                        if (returnedStages.has(item.stage)) verifiedStageIds.add(item.stage);
                     }
-                    featureStatus = `Verificando cooldowns: episódio ${episode} (${refreshedEpisodes + 1}/${BOSS_RUSH_MAX_REFRESHES})…`;
-                    if (panel.classList.contains("open") && view === "bosses" && !modalView) render();
-                    await waitForSyncGap();
-                    const controller = new AbortController();
-                    const timeout = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT);
-                    lastSyncRequestAt = Date.now();
-                    try {
-                        const result = await fetchEpisode(episode, controller.signal);
-                        saveState();
-                        refreshedEpisodes += 1;
-                        const returnedStages = new Set(result.stages.map((stage) => String(stage.stage)));
-                        for (const item of bosses) {
-                            if (returnedStages.has(item.stage)) verifiedStageIds.add(item.stage);
-                        }
-                        episodeVerified = bosses.some((item) => verifiedStageIds.has(item.stage));
-                    } catch (error) {
-                        const message = error?.name === "AbortError" ? "tempo esgotado" : (error?.message || "falha inesperada");
-                        failures.push({ episode, message });
-                        console.error(`[QOL - Digipets] Não foi possível consultar o episódio ${episode} para o Boss Rush.`, error);
-                    } finally {
-                        clearTimeout(timeout);
+                    if (bosses.some((item) => verifiedStageIds.has(item.stage))) {
+                        verifiedEpisodes.add(episode);
                     }
-                } else {
-                    for (const item of bosses) verifiedStageIds.add(item.stage);
+                } catch (error) {
+                    const message = error?.name === "AbortError" ? "tempo esgotado" : (error?.message || "falha inesperada");
+                    failures.push({ episode, message });
+                    console.error(`[QOL - Digipets] Não foi possível consultar o episódio ${episode} para o Boss Rush.`, error);
+                } finally {
+                    clearTimeout(timeout);
                 }
 
-                if (!episodeVerified) continue;
-                verifiedEpisodes.add(episode);
                 const nextReady = bosses.find((item) =>
                     verifiedStageIds.has(item.stage) && stageReadiness(item.stage).ready);
                 if (nextReady) {
@@ -1276,12 +1247,12 @@
             const hasUnverifiedEpisodes = Array.from(episodes.entries()).some(([episode, bosses]) =>
                 !bosses.every((item) => verifiedStageIds.has(item.stage))
                 || !verifiedEpisodes.has(episode));
-            if (hasUnverifiedEpisodes) {
+            if (failures.length) {
+                featureStatus = `Não foi possível confirmar a disponibilidade de ${failures.length} episódio(s). Tente novamente com a página do jogo carregada.`;
+            } else if (hasUnverifiedEpisodes) {
                 featureStatus = "Ainda há episódios sem consulta recente. Toque novamente em “Continuar Rush Boss” para continuar a verificação.";
             } else if (nearestCooldown) {
                 featureStatus = `Nenhum boss disponível. Mais próximo: ${nearestCooldown.item.name} · ${formatRemaining(nearestCooldown.readiness.remaining)}.`;
-            } else if (failures.length) {
-                featureStatus = `Não foi possível confirmar a disponibilidade de ${failures.length} episódio(s). Tente novamente com a página do jogo carregada.`;
             } else {
                 featureStatus = "Nenhum boss disponível foi encontrado nos episódios consultados.";
             }
@@ -1317,11 +1288,14 @@
         const repeatButton = document.querySelector("#RepetirEstagio");
         const resultPanel = document.querySelector("#BatalhaResultado");
         const stageNavigation = document.querySelector("#BatalhaEstagios");
-        const resultVisible = isPageElementVisible(resultPanel)
-            || (isPageElementVisible(repeatButton) && !repeatButton.disabled);
+        const resultVisible = isPageElementVisible(repeatButton) && !repeatButton.disabled
+            || isPageElementVisible(resultPanel);
         if (!resultVisible) return;
-        const resultContainer = [stageNavigation, resultPanel, repeatButton?.parentElement]
-            .find(isPageElementVisible);
+        const mobileViewport = window.matchMedia("(max-width: 600px)").matches;
+        const resultContainer = mobileViewport
+            ? document.body
+            : [stageNavigation, resultPanel, repeatButton?.parentElement]
+                .find(isPageElementVisible) || document.body;
         if (!resultContainer) return;
         const button = document.createElement("button");
         button.id = BATTLE_RUSH_BUTTON_ID;
@@ -1331,7 +1305,7 @@
         button.textContent = bossRushAdvanceRunning ? "Consultando cooldowns…" : "⚔️ Continuar Rush Boss";
         button.disabled = bossRushAdvanceRunning;
         Object.assign(button.style, {
-            margin: "10px 0 10px 8px",
+            margin: mobileViewport ? "0" : "10px 0 10px 8px",
             padding: "11px 18px",
             border: "1px solid #ffe083",
             borderRadius: "10px",
@@ -1341,6 +1315,18 @@
             cursor: "pointer",
             boxShadow: "0 5px 16px #030a1c66,0 0 14px #ffbf4b44"
         });
+        if (mobileViewport) {
+            Object.assign(button.style, {
+                position: "fixed",
+                left: "50%",
+                bottom: "max(76px, calc(env(safe-area-inset-bottom) + 76px))",
+                zIndex: "2147483647",
+                width: "min(92vw, 360px)",
+                minHeight: "48px",
+                transform: "translateX(-50%)",
+                whiteSpace: "normal"
+            });
+        }
         button.addEventListener("mouseenter", () => { button.style.filter = "brightness(1.08)"; });
         button.addEventListener("mouseleave", () => { button.style.filter = ""; });
         button.addEventListener("click", () => continueBossRush(stage));
