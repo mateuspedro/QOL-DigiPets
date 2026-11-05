@@ -18,6 +18,7 @@ O projeto conta com recursos de gerenciamento de mapas e estágios, Boss Rush, D
 - [Instalação](#-instalação)
   - [Windows / Desktop](#-instalação-no-desktop)
   - [iOS / iPhone](#-instalação-no-ios)
+  - [Android](#-instalação-no-android)
 - [Configuração inicial](#-configuração-inicial)
 - [Funcionalidades](#-funcionalidades)
   - [Mapas e estágios](#-mapas-e-estágios)
@@ -53,6 +54,7 @@ Antes de instalar, certifique-se de que possui:
 - Um gerenciador de userscripts instalado e habilitado no navegador.
   - **Desktop:** Tampermonkey (recomendado).
   - **iOS:** Userscripts para Safari.
+  - **Android:** Mozilla e Tampermonkey
 - Acesso à internet para carregar a biblioteca de armazenamento utilizada pelo script.
 - Arquivo de sincronização de mapas no formato **JSON**, necessário para importar os dados compartilhados de episódios e estágios.
 
@@ -100,6 +102,26 @@ Para utilizar o QOL no iPhone, é necessário instalar o aplicativo Userscripts 
 
    Abra ou atualize o [DigiPets](https://digipets.net/) pelo Safari e aproveite as funcionalidades do QOL!
 
+### 📱 Instalação no Android
+
+Para utilizar o QOL no Android, é necessário instalar o aplicativo do navegador [Mozila](https://www.firefox.com/pt-BR/download/android/) e o [Tampermonkey](https://addons.mozilla.org/pt-PT/firefox/addon/tampermonkey/)
+
+1. **Configure o diretório:**
+
+   Abra o Mozila e vá até a extensão do Tampermonkey. depois vá até o menu "Utilitários".
+
+   Aqui escolha a configuração que achar melhor.
+
+   Opção 1- Importar do URL:
+   Cole esse url: https://raw.githubusercontent.com/mateuspedro/QOL-DigiPets/main/QOL%20-%20Digipets.user.js
+
+   Opção 2- Arquivo ou Importar o arquivo:
+   Faça o download do arquivo [QOL - Digipets.user.js](./QOL%20-%20Digipets.user.js) e o importe.
+   
+2. **Acesse o jogo:**
+
+   Abra ou atualize o [DigiPets](https://digipets.net/) pelo Mozila e aproveite as funcionalidades do QOL!
+   
 ---
 
 ## ⚙️ Configuração inicial
