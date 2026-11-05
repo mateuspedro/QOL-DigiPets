@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         QOL - Digipets
 // @namespace    https://digipets.net/
-// @version      1.3.14
+// @version      1.3.15
 // @description  Navegação QOL para DigiPets: bosses, Digitamas, loja, costumes, party e contadores.
 // @author       Kizano
 // @match        https://digipets.net/*
@@ -22,7 +22,7 @@
     if (document.getElementById(HOST_ID)) return;
 
     const STORE_KEY = "qolDigipets.state.v1";
-    const CURRENT_VERSION = "1.3.14";
+    const CURRENT_VERSION = "1.3.15";
     const UPDATE_CHECK_KEY = "qolDigipets.updateCheck.v1";
     const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000;
     const UPDATE_CHECK_TIMEOUT = 8000;
@@ -349,6 +349,9 @@
     const SYNC_COOLDOWN_TTL = 6 * 60 * 60 * 1000;
     const STAGE_FRESH_MS = 6 * 60 * 60 * 1000;
     const DIGITAMA_SYNC_MAX_AGE = 2 * 60 * 1000;
+    const BOSS_RUSH_CACHE_MS = 60 * 1000;
+    const BOSS_RUSH_MAX_REFRESHES = 20;
+    const BOSS_RUSH_CONCURRENCY = 3;
     const BATTLE_RUSH_BUTTON_ID = "qol-rush-next-button";
     const STATE_DEFAULTS = {
         version: 2,
@@ -1141,7 +1144,7 @@
             .sort((left, right) => left.order - right.order);
         const currentIndex = ordered.findIndex((item) => item.stage === String(currentStage));
         if (currentIndex < 0) return ordered;
-        return [...ordered.slice(currentIndex + 1), ...ordered.slice(0, currentIndex + 1)];
+        return [...ordered.slice(currentIndex + 1), ...ordered.slice(0, currentIndex)];
     }
 
     function getEpisodeForStage(stage) {
@@ -1170,6 +1173,10 @@
             showToast("A consulta do próximo boss já está em andamento.");
             return;
         }
+        if (syncRunning || digitamaSyncRunning || stageCooldownSyncRunning) {
+            showToast("Aguarde a sincronização de cooldowns em andamento.");
+            return;
+        }
         const battleStage = location.pathname === "/batalha"
             ? new URLSearchParams(location.search).get("estagio") || ""
             : "";
@@ -1193,44 +1200,113 @@
         featureStatus = "Consultando cooldowns no jogo para localizar o próximo boss disponível…";
         if (panel.classList.contains("open") && view === "bosses" && !modalView) render();
 
+        const work = Array.from(episodes, ([episode, bosses]) => {
+            const episodeCheckedAt = Number(state.episodes[String(episode)]?.checkedAt) || 0;
+            const episodeAge = Date.now() - episodeCheckedAt;
+            const recentlyChecked = episodeCheckedAt > 0
+                && episodeAge >= 0
+                && episodeAge < BOSS_RUSH_CACHE_MS
+                && bosses.every((item) => {
+                    const record = state.stages[item.stage];
+                    const age = Date.now() - Number(record?.checkedAt || 0);
+                    return Number(record?.episode) === episode
+                        && age >= 0
+                        && age < BOSS_RUSH_CACHE_MS;
+                });
+            const cachedReady = recentlyChecked
+                ? bosses.find((item) => stageReadiness(item.stage).ready)
+                : null;
+            const coolingDown = bosses.every((item) => {
+                const readiness = stageReadiness(item.stage);
+                return readiness.fresh && readiness.remaining !== null && readiness.remaining > 0;
+            });
+            return {
+                episode,
+                bosses,
+                cachedReady,
+                cachedCoolingDown: !cachedReady && coolingDown
+            };
+        });
+
         let refreshedEpisodes = 0;
+        let index = 0;
         const failures = [];
         const verifiedEpisodes = new Set();
         const verifiedStageIds = new Set();
         try {
-            for (const [episode, bosses] of episodes) {
-                refreshedEpisodes += 1;
-                featureStatus = `Sincronizando cooldowns: episódio ${episode} (${refreshedEpisodes}/${episodes.size})…`;
-                if (panel.classList.contains("open") && view === "bosses" && !modalView) render();
-                await waitForSyncGap();
-                const controller = new AbortController();
-                const timeout = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT);
-                lastSyncRequestAt = Date.now();
-                try {
-                    const result = await fetchEpisode(episode, controller.signal);
-                    saveState();
-                    const returnedStages = new Set(result.stages.map((stage) => String(stage.stage)));
-                    for (const item of bosses) {
-                        if (returnedStages.has(item.stage)) verifiedStageIds.add(item.stage);
+            while (index < work.length) {
+                const entry = work[index];
+                if (entry.cachedReady) {
+                    window.location.href = `/batalha?estagio=${encodeURIComponent(entry.cachedReady.stage)}#DP`;
+                    return;
+                }
+                if (entry.cachedCoolingDown) {
+                    verifiedEpisodes.add(entry.episode);
+                    entry.bosses.forEach((item) => verifiedStageIds.add(item.stage));
+                    index += 1;
+                    continue;
+                }
+                if (refreshedEpisodes >= BOSS_RUSH_MAX_REFRESHES) break;
+
+                const batch = [];
+                while (index < work.length
+                    && batch.length < BOSS_RUSH_CONCURRENCY
+                    && refreshedEpisodes + batch.length < BOSS_RUSH_MAX_REFRESHES) {
+                    const candidate = work[index];
+                    if (candidate.cachedCoolingDown) {
+                        verifiedEpisodes.add(candidate.episode);
+                        candidate.bosses.forEach((item) => verifiedStageIds.add(item.stage));
+                        index += 1;
+                        continue;
                     }
-                    if (bosses.some((item) => verifiedStageIds.has(item.stage))) {
-                        verifiedEpisodes.add(episode);
-                    }
-                } catch (error) {
-                    const message = error?.name === "AbortError" ? "tempo esgotado" : (error?.message || "falha inesperada");
-                    failures.push({ episode, message });
-                    console.error(`[QOL - Digipets] Não foi possível consultar o episódio ${episode} para o Boss Rush.`, error);
-                } finally {
-                    clearTimeout(timeout);
+                    if (candidate.cachedReady) break;
+                    batch.push(candidate);
+                    index += 1;
+                }
+                if (!batch.length) continue;
+
+                const requests = [];
+                for (const candidate of batch) {
+                    featureStatus = `Consultando cooldowns: episódio ${candidate.episode} (${refreshedEpisodes + 1}/${BOSS_RUSH_MAX_REFRESHES})…`;
+                    if (panel.classList.contains("open") && view === "bosses" && !modalView) render();
+                    await waitForSyncGap();
+                    const controller = new AbortController();
+                    const timeout = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+                    lastSyncRequestAt = Date.now();
+                    refreshedEpisodes += 1;
+                    requests.push((async () => {
+                        try {
+                            const result = await fetchEpisode(candidate.episode, controller.signal);
+                            const returnedStages = new Set(result.stages.map((stage) => String(stage.stage)));
+                            const matchedBosses = candidate.bosses.filter((item) => returnedStages.has(item.stage));
+                            if (!matchedBosses.length) {
+                                throw new Error(`O episódio ${candidate.episode} não retornou o estágio de boss esperado.`);
+                            }
+                            saveState();
+                            return { candidate, matchedBosses };
+                        } catch (error) {
+                            const message = error?.name === "AbortError" ? "tempo esgotado" : (error?.message || "falha inesperada");
+                            failures.push({ episode: candidate.episode, message });
+                            console.error(`[QOL - Digipets] Não foi possível consultar o episódio ${candidate.episode} para o Boss Rush.`, error);
+                            return { candidate, matchedBosses: [] };
+                        } finally {
+                            clearTimeout(timeout);
+                        }
+                    })());
                 }
 
-                const nextReady = bosses.find((item) =>
-                    verifiedStageIds.has(item.stage) && stageReadiness(item.stage).ready);
-                if (nextReady) {
-                    saveState();
-                    featureStatus = `${nextReady.name} está disponível. Abrindo o estágio ${nextReady.stage}…`;
-                    window.location.href = `/batalha?estagio=${encodeURIComponent(nextReady.stage)}#DP`;
-                    return;
+                const results = await Promise.all(requests);
+                for (const { candidate, matchedBosses } of results) {
+                    if (!matchedBosses.length) continue;
+                    verifiedEpisodes.add(candidate.episode);
+                    matchedBosses.forEach((item) => verifiedStageIds.add(item.stage));
+                    const nextReady = matchedBosses.find((item) => stageReadiness(item.stage).ready);
+                    if (nextReady) {
+                        saveState();
+                        featureStatus = `${nextReady.name} está disponível. Abrindo o estágio ${nextReady.stage}…`;
+                        window.location.href = `/batalha?estagio=${encodeURIComponent(nextReady.stage)}#DP`;
+                        return;
+                    }
                 }
             }
 
@@ -1244,13 +1320,11 @@
                     verifiedEpisodes.has(episode) && verifiedStageIds.has(item.stage))
                 .filter(({ readiness }) => readiness.fresh && readiness.remaining > 0)
                 .sort((left, right) => left.readiness.remaining - right.readiness.remaining)[0];
-            const hasUnverifiedEpisodes = Array.from(episodes.entries()).some(([episode, bosses]) =>
-                !bosses.every((item) => verifiedStageIds.has(item.stage))
-                || !verifiedEpisodes.has(episode));
+            const hasUnverifiedEpisodes = index < work.length;
             if (failures.length) {
                 featureStatus = `Não foi possível confirmar a disponibilidade de ${failures.length} episódio(s). Tente novamente com a página do jogo carregada.`;
             } else if (hasUnverifiedEpisodes) {
-                featureStatus = "Ainda há episódios sem consulta recente. Toque novamente em “Continuar Rush Boss” para continuar a verificação.";
+                featureStatus = `Consultados ${refreshedEpisodes} episódios; toque novamente em “Continuar Rush Boss” para continuar.`;
             } else if (nearestCooldown) {
                 featureStatus = `Nenhum boss disponível. Mais próximo: ${nearestCooldown.item.name} · ${formatRemaining(nearestCooldown.readiness.remaining)}.`;
             } else {
@@ -1277,12 +1351,16 @@
         const stage = new URLSearchParams(location.search).get("estagio") || "";
         const isBoss = !DIGITAMA_STAGE_IDS.has(stage)
             && BOSS_CATALOG.some((item) => item.stage === stage);
+        const mobileViewport = window.matchMedia("(max-width: 600px)").matches;
         const existing = document.getElementById(BATTLE_RUSH_BUTTON_ID);
         if (!isBoss) {
             existing?.remove();
             return;
         }
-        if (existing?.dataset.stage === stage && existing.isConnected) return;
+        if (existing?.dataset.stage === stage && existing.isConnected) {
+            const existingIsFixed = existing.style.position === "fixed";
+            if (existingIsFixed === mobileViewport) return;
+        }
         existing?.remove();
 
         const repeatButton = document.querySelector("#RepetirEstagio");
@@ -1291,7 +1369,6 @@
         const resultVisible = isPageElementVisible(repeatButton) && !repeatButton.disabled
             || isPageElementVisible(resultPanel);
         if (!resultVisible) return;
-        const mobileViewport = window.matchMedia("(max-width: 600px)").matches;
         const resultContainer = mobileViewport
             ? document.body
             : [stageNavigation, resultPanel, repeatButton?.parentElement]
@@ -1338,23 +1415,31 @@
         refreshBattleRushButton();
         const Observer = window.MutationObserver;
         if (typeof Observer !== "function") {
-            console.error("[QOL - Digipets] MutationObserver indisponível; não será possível monitorar o resultado da batalha.");
-            return;
+            console.warn("[QOL - Digipets] MutationObserver indisponível; usando verificação periódica do resultado.");
+        } else {
+            const observer = new Observer(() => {
+                if (battleResultCheckTimer) return;
+                battleResultCheckTimer = window.setTimeout(() => {
+                    battleResultCheckTimer = 0;
+                    refreshBattleRushButton();
+                }, 180);
+            });
+            const observerRoot = document.body || document.documentElement;
+            try {
+                observer.observe(observerRoot, {
+                    childList: true,
+                    subtree: true,
+                    attributes: true,
+                    attributeFilter: ["class", "style", "hidden", "disabled"]
+                });
+                battleResultObserver = observer;
+            } catch (error) {
+                observer.disconnect();
+                console.error("[QOL - Digipets] Não foi possível observar o resultado da batalha; usando verificação periódica.", error);
+            }
         }
-        battleResultObserver = new Observer(() => {
-            if (battleResultCheckTimer) return;
-            battleResultCheckTimer = window.setTimeout(() => {
-                battleResultCheckTimer = 0;
-                refreshBattleRushButton();
-            }, 180);
-        });
-        battleResultObserver.observe(document.documentElement, {
-            childList: true,
-            subtree: true,
-            attributes: true,
-            attributeFilter: ["class", "style", "hidden", "disabled"]
-        });
-        battleResultCheckInterval = window.setInterval(refreshBattleRushButton, 1000);
+        battleResultCheckInterval = window.setInterval(refreshBattleRushButton, 2000);
+        window.addEventListener("pageshow", refreshBattleRushButton);
     }
 
     function checkBossAlerts() {
@@ -1431,7 +1516,7 @@
                 <div class="feature-copy"><strong>${escapeHtml(item.name || `Estágio ${id}`)}</strong>
                     <small>Estágio ${escapeHtml(id)}${item.episode ? ` · Episódio ${escapeHtml(item.episode)}` : ""}${item.bp ? ` · BP ${escapeHtml(item.bp)}` : ""}${!isDigitama && item.cooldown ? ` · CD cadastrado ${escapeHtml(item.cooldown)} min` : ""} · <span class="boss-cooldown" data-expiry="${Number(state.stages[id]?.expiresAt) || 0}" data-available="${Boolean(state.stages[id]?.available)}" data-unknown="${readiness.remaining === null}" data-stale="${!readiness.fresh}" data-stale-label="${escapeHtml(!isDigitama && item.cooldown ? `CD atual n/d · catálogo ${item.cooldown} min` : "CD desatualizado")}" data-stage="${escapeHtml(id)}">${escapeHtml(timer)}</span></small></div>
                 <div class="feature-actions">
-                    <button class="green" type="button" data-action="${stageAction}" data-stage="${escapeHtml(id)}" ${coolingDown || refreshing || !item.episode ? "disabled" : ""}>${stageActionText}</button>
+                    <button class="green" type="button" data-action="${stageAction}" data-stage="${escapeHtml(id)}" ${coolingDown || refreshing || !item.episode || bossRushAdvanceRunning ? "disabled" : ""}>${stageActionText}</button>
                     <button class="${alert ? "green" : "gray"}" type="button" data-action="toggle-boss-alert" data-stage="${escapeHtml(id)}" aria-pressed="${alert}">${alert ? "🔔 Alarme ativo" : "🔕 Alarme"}</button>
                     <button class="favorite-action" type="button" data-action="toggle-boss-favorite" data-stage="${escapeHtml(id)}" aria-pressed="${favorite}"><span class="favorite-star" aria-hidden="true">★</span> ${favorite ? "Favorito" : "Favoritar"}</button>
                     ${item.episode ? `<button class="stage-map-button" type="button" data-action="open-episode" data-episode="${escapeHtml(item.episode)}">🗺️ Mapa</button>` : ""}
@@ -1443,9 +1528,14 @@
         const syncNote = isDigitama
             ? "Ao abrir esta tela, o mapa de Digitamas (episódio 53) é consultado para atualizar os cooldowns."
             : `Catálogo completo de ${items.length} bosses. O mapeamento é integrado; atualize cada cooldown pelo jogo ou sincronize os episódios.`;
+        const rushSyncBlocked = syncRunning || digitamaSyncRunning || stageCooldownSyncRunning;
+        const rushButtonDisabled = bossRushAdvanceRunning || rushSyncBlocked;
+        const rushButtonText = bossRushAdvanceRunning
+            ? "Consultando cooldowns…"
+            : rushSyncBlocked ? "Aguarde a sincronização…" : "⚔️ Continuar Rush Boss";
         content.innerHTML = `
             <div class="toolbar"><button class="gray" data-action="home">← Início</button><strong>${header}</strong><div class="toolbar-actions">
-                ${!isDigitama ? '<button class="green" data-action="next-boss" ' + (bossRushAdvanceRunning ? "disabled" : "") + '>' + (bossRushAdvanceRunning ? "Consultando cooldowns…" : "⚔️ Continuar Rush Boss") + '</button><button class="gray" data-action="sync-stages" ' + (syncRunning || digitamaSyncRunning || stageCooldownSyncRunning ? "disabled" : "") + '>' + (syncRunning ? "Sync…" : "Sync mapas") + '</button>' : '<button class="green" data-action="refresh-digitamas" ' + (digitamaSyncRunning || syncRunning || stageCooldownSyncRunning ? "disabled" : "") + '>' + (digitamaSyncRunning ? "Atualizando…" : "Atualizar CD") + '</button>'}
+                ${!isDigitama ? `<button class="green" data-action="next-boss" ${rushButtonDisabled ? "disabled" : ""}>${rushButtonText}</button>` + '<button class="gray" data-action="sync-stages" ' + (syncRunning || digitamaSyncRunning || stageCooldownSyncRunning || bossRushAdvanceRunning ? "disabled" : "") + '>' + (syncRunning ? "Sync…" : "Sync mapas") + '</button>' : '<button class="green" data-action="refresh-digitamas" ' + (digitamaSyncRunning || syncRunning || stageCooldownSyncRunning || bossRushAdvanceRunning ? "disabled" : "") + '>' + (digitamaSyncRunning ? "Atualizando…" : "Atualizar CD") + '</button>'}
             </div></div>
             <p class="intro">${escapeHtml(syncNote)} Os alarmes são locais e verificam os cooldowns enquanto o DigiPets está aberto.</p>
             ${!isDigitama ? '<button class="gray" type="button" data-action="show-ignored">Exibir bosses ignorados</button>' : ""}
@@ -2003,7 +2093,7 @@
     }
 
     async function refreshStageCooldown(stageId) {
-        if (syncRunning || digitamaSyncRunning || stageCooldownSyncRunning) {
+        if (syncRunning || digitamaSyncRunning || stageCooldownSyncRunning || bossRushAdvanceRunning) {
             showToast("Já existe uma consulta de cooldown em andamento. Aguarde ela terminar.");
             return;
         }
@@ -2111,7 +2201,7 @@
             <div class="toolbar"><button class="gray" data-action="home">← Início</button><strong>Mapas e estágios</strong><div class="toolbar-actions">
                 <button class="gray" data-action="import-sync">⬆ Importar sync</button>
                 <button class="gray" data-action="export-sync" ${Object.keys(state.episodes).length ? "" : "disabled"}>⬇ Exportar</button>
-                <button class="green" data-action="sync-stages" ${syncRunning || digitamaSyncRunning || stageCooldownSyncRunning ? "disabled" : ""}>${syncRunning ? "Sincronizando…" : "Atualizar mapas"}</button>
+                <button class="green" data-action="sync-stages" ${syncRunning || digitamaSyncRunning || stageCooldownSyncRunning || bossRushAdvanceRunning ? "disabled" : ""}>${syncRunning ? "Sincronizando…" : "Atualizar mapas"}</button>
             </div></div>
             <p class="intro">O mapeamento de episódios e estágios já vem integrado. Use <b>Mapa</b> para consultar o jogo e atualizar os cooldowns; importar um sync é opcional.</p>
             <input class="search" id="stage-search" type="search" placeholder="Buscar por nome, estágio ou episódio" value="${escapeHtml(searchQuery)}">
@@ -2151,7 +2241,7 @@
             </div>
             <div class="config-row">
                 <div class="config-copy"><strong>Sincronizar estágios</strong><small>O mapeamento já vem integrado. Consulta até ${SYNC_BATCH_SIZE} episódios por execu\u00e7ão, com intervalo entre pedidos; execute novamente para atualizar o restante.</small></div>
-                <button class="green" type="button" data-action="sync-stages" ${syncRunning || digitamaSyncRunning || stageCooldownSyncRunning ? "disabled" : ""}>${syncRunning ? "Sincronizando…" : "Atualizar mapas"}</button>
+                <button class="green" type="button" data-action="sync-stages" ${syncRunning || digitamaSyncRunning || stageCooldownSyncRunning || bossRushAdvanceRunning ? "disabled" : ""}>${syncRunning ? "Sincronizando…" : "Atualizar mapas"}</button>
             </div>
             <section class="config-row sync-config">
                 <div class="config-copy"><strong>Sync opcional</strong><small>Importe ou exporte um JSON para compartilhar dados. O mapa necessário para navegação e cooldowns já está integrado ao userscript.</small></div>
@@ -2320,7 +2410,7 @@
 
     async function syncStages() {
         if (syncRunning) return;
-        if (digitamaSyncRunning || stageCooldownSyncRunning) {
+        if (digitamaSyncRunning || stageCooldownSyncRunning || bossRushAdvanceRunning) {
             showToast("Aguarde a consulta de cooldown em andamento antes de sincronizar os mapas.");
             return;
         }
@@ -2372,7 +2462,7 @@
             render();
             return;
         }
-        if (syncRunning || stageCooldownSyncRunning) {
+        if (syncRunning || stageCooldownSyncRunning || bossRushAdvanceRunning) {
             digitamaSyncStatus = "A sincroniza\u00e7ão geral já está consultando episódios; aguarde a rodada.";
             render();
             return;
