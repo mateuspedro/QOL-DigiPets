@@ -69,7 +69,8 @@ Antes de instalar, certifique-se de que possui:
 3. Clique no botão **Raw**, localizado no GitHub.
 4. O Tampermonkey deverá abrir automaticamente a página de instalação do userscript.
 5. Clique em **Instalar** e aguarde a confirmação.
-6. Acesse ou atualize o [DigiPets](https://digipets.net/) e entre na sua conta.
+6. No tampermonkey, clique com o botão direito do mouse e vá até gerenciar extensão e ative a opção: **Permitir scripts de usuario e permitir URLS de arquivos.** 
+7. Acesse ou atualize o [DigiPets](https://digipets.net/) e entre na sua conta.
 
 Após a instalação, o botão flutuante **QOL - Digipets** estará disponível na página. Clique nele para abrir o painel e acessar as funcionalidades.
 
