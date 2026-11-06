@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         QOL - Digipets
 // @namespace    https://digipets.net/
-// @version      1.3.15
-// @description  Navegação QOL para DigiPets: bosses, Digitamas, loja, costumes, party e contadores.
+// @version      1.3.16
+// @description  Navegação QOL para DigiPets: bosses, Digitamas, DigiFarm, loja, costumes, party e contadores.
 // @author       Kizano
 // @match        https://digipets.net/*
 // @run-at       document-idle
@@ -22,7 +22,7 @@
     if (document.getElementById(HOST_ID)) return;
 
     const STORE_KEY = "qolDigipets.state.v1";
-    const CURRENT_VERSION = "1.3.15";
+    const CURRENT_VERSION = "1.3.16";
     const UPDATE_CHECK_KEY = "qolDigipets.updateCheck.v1";
     const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000;
     const UPDATE_CHECK_TIMEOUT = 8000;
@@ -381,6 +381,17 @@
     let digitamaSyncStatus = "";
     let stageCooldownSyncRunning = false;
     let stageCooldownRefreshStage = "";
+    let farmUserId = "";
+    let farmUserIdLoading = false;
+    let farmSlots = [];
+    let farmSelectedSlot = "";
+    let farmDigitamas = [];
+    let farmSelectedDigitama = "0";
+    let farmSlotsLoading = false;
+    let farmLoading = false;
+    let farmSubmitting = false;
+    let farmRequestId = 0;
+    let farmStatus = "";
     let importRunning = false;
     let searchQuery = "";
     let featureSearch = "";
@@ -689,6 +700,18 @@
             .feature-copy small { color: #718394; font-size: 10px; }
             .feature-actions { display: flex; flex-wrap: wrap; grid-column: 1 / -1; gap: 6px; }
             .feature-actions button { padding: 6px 8px; }
+            .farm-form { display: grid; gap: 11px; }
+            .farm-form > label { display: grid; gap: 6px; color: #c4d9ee; font-size: 12px; font-weight: 700; }
+            .farm-form select { width: 100%; min-height: 44px; padding: 9px 10px; border: 1px solid #3b5b75; border-radius: 8px; background: #0b1728; color: #eaf5ff; font: 14px Arial,sans-serif; }
+            .farm-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+            .farm-actions button { flex: 1 1 150px; min-height: 44px; }
+            .farm-inventory { margin-top: 15px; padding-top: 13px; border-top: 1px solid #3b5b75; }
+            .farm-inventory-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 7px; margin-bottom: 9px; }
+            .farm-inventory-head strong { color: #ffe083; font-size: 13px; }
+            .farm-inventory-head small { color: #9bbbd0; font-size: 11px; }
+            .farm-digitama-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+            .farm-digitama-item { width: 100%; min-height: 42px; padding: 9px 11px; border-color: #3b5b75; background: linear-gradient(120deg,#172e49,#14213a); color: #c4d9ee; text-align: left; overflow-wrap: anywhere; }
+            .farm-digitama-item[aria-pressed="true"] { border-color: #ffe083; background: linear-gradient(120deg,#614a20,#493b38); color: #fff1bd; }
             .feature-actions .favorite-action, .stage-actions .favorite-action, .fashion-card-actions .favorite-action { border-color: #718096; background: linear-gradient(135deg,#3b4758,#293449); color: #aeb9c7; }
             button.favorite-action[aria-pressed="true"] { border-color: #ffe083; background: linear-gradient(135deg,#604817,#47333d); color: #ffe083; }
             .favorite-star { color: #9aa7b5; font-size: 17px; line-height: 1; text-shadow: none; vertical-align: -1px; }
@@ -865,6 +888,9 @@
                 .home-link { min-height: 58px; padding: 12px; }
                 .config-row { align-items: flex-start; }
                 .switch { min-height: 44px; }
+                .farm-form select { font-size: 16px; }
+                .farm-actions { flex-direction: column; }
+                .farm-actions button { width: 100%; flex-basis: auto; }
                 #toast { right: max(12px,env(safe-area-inset-right)); bottom: max(72px,calc(env(safe-area-inset-bottom) + 60px)); max-width: calc(100vw - 24px); }
             }
             @media (max-width: 360px) {
@@ -2139,11 +2165,12 @@
 
     function renderHome() {
         content.innerHTML = `
-            <p class="intro">Qualidade de vida para o DigiPets: navega\u00e7ão de bosses e Digitamas, gestão de conta, loja e contadores.</p>
+            <p class="intro">Qualidade de vida para o DigiPets: navega\u00e7ão de bosses e Digitamas, envio à DigiFarm, loja e contadores.</p>
             <div class="home-grid">
                 <button class="home-link" type="button" data-action="view-stages"><span><strong>🗺️ Mapas e estágios</strong><small>${Object.keys(state.stages).length} estágio(s) no mapa · ${getCoverage()}/${EPISODE_IDS.length} episódios conhecidos</small></span><b>›</b></button>
                 <button class="home-link" type="button" data-action="view-bosses"><span><strong>⚔️ Boss Rush</strong><small>${BOSS_CATALOG.length} bosses no catálogo · alarmes, favoritos e ignorar</small></span><b>›</b></button>
                 <button class="home-link" type="button" data-action="view-digitamas"><span><strong>🥚 Digitamas</strong><small>Consultar cooldowns e abrir estágios</small></span><b>›</b></button>
+                <button class="home-link" type="button" data-action="view-digifarm"><span><strong>🏡 Enviar à DigiFarm</strong><small>Selecionar ovos e enviar para uma incubadora livre</small></span><b>›</b></button>
                 <button class="home-link" type="button" data-action="view-shop"><span><strong>🛒 Loja Black Trader</strong><small>Pesquisar produtos e comprar com confirma\u00e7ão</small></span><b>›</b></button>
                 <button class="home-link" type="button" data-action="view-fashion"><span><strong>👕 Trocar Costume</strong><small>Escolher roupa e guardar favoritos</small></span><b>›</b></button>
                 <button class="home-link" type="button" data-action="view-party"><span><strong>👥 Editar Party</strong><small>Trocar membros, remover Digimons e ativar forma\u00e7ão</small></span><b>›</b></button>
@@ -2254,6 +2281,232 @@
         `;
     }
 
+    function renderDigifarm() {
+        const slotOptions = farmSlots.map((slot) =>
+            `<option value="${escapeHtml(slot)}" ${farmSelectedSlot === slot ? "selected" : ""}>Incubadora ${escapeHtml(slot)}</option>`
+        ).join("");
+        const digitamaOptions = farmDigitamas.map((digitama) =>
+            `<option value="${escapeHtml(digitama.value)}" ${farmSelectedDigitama === digitama.value ? "selected" : ""}>${escapeHtml(digitama.label)}</option>`
+        ).join("");
+        const digitamaList = farmDigitamas.length
+            ? `<ul class="farm-digitama-list">${farmDigitamas.map((digitama) => `
+                <li><button class="farm-digitama-item" type="button" data-action="farm-select-digitama" data-digitama="${escapeHtml(digitama.value)}" aria-pressed="${farmSelectedDigitama === digitama.value}" ${farmLoading || farmSubmitting ? "disabled" : ""}>${escapeHtml(digitama.label)}</button></li>
+            `).join("")}</ul>`
+            : `<div class="status">${farmLoading ? "Carregando os Digitamas desta incubadora…" : "Nenhum Digitama disponível nesta incubadora."}</div>`;
+        content.innerHTML = `
+            <div class="toolbar">
+                <button class="gray" type="button" data-action="home">← Início</button>
+                <strong>🏡 Enviar à DigiFarm</strong>
+                <div class="toolbar-actions">
+                    <button class="gray" type="button" data-action="farm-refresh-slots" ${farmSlotsLoading || farmLoading || farmSubmitting ? "disabled" : ""}>${farmSlotsLoading ? "Atualizando…" : "Atualizar incubadoras"}</button>
+                </div>
+            </div>
+            <p class="intro">Escolha uma incubadora livre, atualize os Digitamas disponíveis e envie um ovo para iniciar a incubação.</p>
+            <div class="farm-form">
+                <label for="farm-slot">Incubadora
+                    <select id="farm-slot" ${farmSlotsLoading || farmLoading || farmSubmitting || !farmSlots.length ? "disabled" : ""}>
+                        ${slotOptions || '<option value="">Nenhuma incubadora disponível</option>'}
+                    </select>
+                </label>
+                <label for="farm-digitama">Digitama disponível
+                    <select id="farm-digitama" ${farmLoading || farmSlotsLoading || farmSubmitting || !farmDigitamas.length ? "disabled" : ""}>
+                        ${digitamaOptions || '<option value="0">Nenhum Digitama disponível</option>'}
+                    </select>
+                </label>
+                <div class="farm-actions">
+                    <button class="gray" type="button" data-action="farm-refresh-eggs" ${farmLoading || farmSlotsLoading || farmSubmitting || !farmSelectedSlot ? "disabled" : ""}>${farmLoading ? "Atualizando ovos…" : "Atualizar ovos"}</button>
+                    <button class="green" type="button" data-action="farm-send" ${farmLoading || farmSlotsLoading || farmSubmitting || !farmSelectedSlot || !farmDigitamas.some((item) => item.value === farmSelectedDigitama) ? "disabled" : ""}>${farmSubmitting ? "Enviando…" : "Enviar à incubadora"}</button>
+                </div>
+                <div class="status" role="status" aria-live="polite">${escapeHtml(farmStatus || "As incubadoras livres e desbloqueadas aparecem na lista.")}</div>
+                <section class="farm-inventory" aria-label="Digitamas disponíveis">
+                    <div class="farm-inventory-head"><strong>🥚 Digitamas disponíveis</strong><small>${farmLoading ? "Atualizando lista…" : `${farmDigitamas.length} ovo(s)`}</small></div>
+                    ${digitamaList}
+                </section>
+            </div>
+        `;
+    }
+
+    function updateFarmDigitamaSelection() {
+        const select = content.querySelector("#farm-digitama");
+        if (select) select.value = farmSelectedDigitama;
+        for (const button of content.querySelectorAll(".farm-digitama-item")) {
+            button.setAttribute("aria-pressed", String(button.dataset.digitama === farmSelectedDigitama));
+        }
+    }
+
+    async function fetchFarmRequest(url, options = {}) {
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+        try {
+            return await fetch(url, {
+                ...options,
+                credentials: "same-origin",
+                cache: "no-store",
+                signal: controller.signal
+            });
+        } catch (error) {
+            if (error?.name === "AbortError") {
+                throw new Error("A consulta à DigiFarm demorou demais. Tente novamente.");
+            }
+            throw error;
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
+    async function loadFarmUserId(forceRefresh = false) {
+        if (farmUserIdLoading) throw new Error("A identificação da conta já está em andamento.");
+        if (farmUserId && !forceRefresh) return farmUserId;
+        farmUserIdLoading = true;
+        try {
+            const response = await fetchFarmRequest("/usuario_perfil");
+            if (!response.ok) throw new Error(`Erro HTTP ${response.status}`);
+            const profileHtml = await response.text();
+            const profile = new DOMParser().parseFromString(profileHtml, "text/html");
+            const userName = profile.querySelector(".UsuarioNome")?.textContent || "";
+            const match = userName.match(/\bID\s*#\s*(\d+)\b/i);
+            if (!match) throw new Error("Não foi possível identificar a conta no perfil do DigiPets.");
+            farmUserId = match[1];
+            return farmUserId;
+        } finally {
+            farmUserIdLoading = false;
+        }
+    }
+
+    async function fetchFarmSlots(forceUserIdRefresh = false) {
+        const uid = await loadFarmUserId(forceUserIdRefresh);
+        const response = await fetchFarmRequest("/ajax/dp-digifarm-carregar.php", {
+            method: "POST",
+            headers: { "X-Requested-With": "XMLHttpRequest" },
+            body: new URLSearchParams({ uid })
+        });
+        if (!response.ok) throw new Error(`Erro HTTP ${response.status}`);
+        const result = await response.json();
+        if (result.possuifarm !== "s" || typeof result.incubadoras !== "string") {
+            throw new Error("O jogo não retornou os dados da DigiFarm.");
+        }
+        const farm = new DOMParser().parseFromString(result.incubadoras, "text/html");
+        return [...new Set(Array.from(farm.querySelectorAll("a[onclick]"))
+            .map((link) => link.getAttribute("onclick")?.match(/boxAdicionaDigitama\(\s*(\d+)\s*\)/)?.[1] || "")
+            .filter(Boolean))];
+    }
+
+    function parseFarmDigitamas(listHtml) {
+        const parsed = new DOMParser().parseFromString(String(listHtml || ""), "text/html");
+        const select = parsed.querySelector('select[name="digitama"]');
+        if (!select) throw new Error("O jogo não retornou a lista de Digitamas.");
+        return Array.from(select.options)
+            .filter((option) => /^\d+$/.test(option.value) && option.value !== "0")
+            .map((option) => ({ value: option.value, label: option.textContent.trim() }))
+            .filter((digitama) => digitama.label);
+    }
+
+    async function loadFarmDigitamas(slot = farmSelectedSlot) {
+        if (!/^\d+$/.test(String(slot || "")) || farmSlotsLoading || farmSubmitting) return;
+        const requestId = ++farmRequestId;
+        farmSelectedSlot = String(slot);
+        farmLoading = true;
+        farmStatus = "Carregando os Digitamas disponíveis...";
+        if (view === "digifarm") render();
+        try {
+            const response = await fetchFarmRequest("/ajax/dp-digifarm-listar-conteudo.php", {
+                method: "POST",
+                headers: { "X-Requested-With": "XMLHttpRequest" },
+                body: new URLSearchParams({ slotid: farmSelectedSlot })
+            });
+            if (!response.ok) throw new Error(`Erro HTTP ${response.status}`);
+            const result = await response.json();
+            if (Number(result.status) !== 1 || typeof result.listar !== "string") {
+                throw new Error("O jogo não retornou os Digitamas disponíveis.");
+            }
+            const digitamas = parseFarmDigitamas(result.listar);
+            if (requestId !== farmRequestId) return;
+            farmDigitamas = digitamas;
+            if (!farmDigitamas.some((item) => item.value === farmSelectedDigitama)) {
+                farmSelectedDigitama = farmDigitamas[0]?.value || "0";
+            }
+            farmStatus = farmDigitamas.length
+                ? `${farmDigitamas.length} Digitama(s) disponível(is) para esta incubadora.`
+                : "Nenhum Digitama disponível para esta incubadora.";
+        } catch (error) {
+            if (requestId !== farmRequestId) return;
+            console.error("[QOL - Digipets] Falha ao consultar os Digitamas da DigiFarm.", error);
+            farmDigitamas = [];
+            farmSelectedDigitama = "0";
+            farmStatus = error.message || "Não foi possível carregar os Digitamas.";
+        } finally {
+            if (requestId === farmRequestId) {
+                farmLoading = false;
+                if (view === "digifarm") render();
+            }
+        }
+    }
+
+    async function loadFarmSlots(forceUserIdRefresh = false) {
+        if (farmSlotsLoading) return;
+        farmSlotsLoading = true;
+        farmRequestId += 1;
+        farmLoading = false;
+        farmDigitamas = [];
+        farmSelectedDigitama = "0";
+        farmStatus = "Consultando as incubadoras disponíveis...";
+        if (forceUserIdRefresh) farmUserId = "";
+        if (view === "digifarm") render();
+        try {
+            const slots = await fetchFarmSlots(forceUserIdRefresh);
+            farmSlots = slots;
+            if (!farmSlots.includes(farmSelectedSlot)) farmSelectedSlot = farmSlots[0] || "";
+            farmStatus = farmSlots.length
+                ? `${farmSlots.length} incubadora(s) livre(s) e desbloqueada(s).`
+                : "Não há incubadoras vazias e desbloqueadas disponíveis.";
+        } catch (error) {
+            console.error("[QOL - Digipets] Falha ao consultar as incubadoras da DigiFarm.", error);
+            farmSlots = [];
+            farmSelectedSlot = "";
+            farmStatus = error.message || "Não foi possível consultar a DigiFarm.";
+        } finally {
+            farmSlotsLoading = false;
+            if (view === "digifarm") render();
+        }
+        if (farmSelectedSlot) await loadFarmDigitamas(farmSelectedSlot);
+    }
+
+    async function addFarmDigitama() {
+        if (farmSubmitting || farmLoading || farmSlotsLoading
+            || !farmSlots.includes(farmSelectedSlot)
+            || !farmDigitamas.some((item) => item.value === farmSelectedDigitama)) return;
+        const digitama = farmDigitamas.find((item) => item.value === farmSelectedDigitama);
+        farmSubmitting = true;
+        farmStatus = "Enviando o Digitama para a incubadora...";
+        if (view === "digifarm") render();
+        try {
+            const response = await fetchFarmRequest("/ajax/dp-digifarm-digitama-adicionar.php", {
+                method: "POST",
+                headers: { "X-Requested-With": "XMLHttpRequest" },
+                body: new URLSearchParams({
+                    slotid: farmSelectedSlot,
+                    digitama: farmSelectedDigitama
+                })
+            });
+            if (!response.ok) throw new Error(`Erro HTTP ${response.status}`);
+            const result = await response.json();
+            if (Number(result.status) !== 1 || result.adicionou !== "s") {
+                throw new Error(result.mensagem || "O jogo não confirmou o envio do Digitama.");
+            }
+            const successMessage = `${digitama.label} enviado à incubadora ${farmSelectedSlot}.`;
+            showToast(successMessage);
+            farmSubmitting = false;
+            await loadFarmSlots();
+        } catch (error) {
+            console.error("[QOL - Digipets] Falha ao enviar o Digitama para a DigiFarm.", error);
+            farmStatus = error.message || "Não foi possível enviar o Digitama.";
+            showToast(farmStatus);
+        } finally {
+            farmSubmitting = false;
+            if (view === "digifarm") render();
+        }
+    }
+
     function render() {
         featureModal.classList.toggle("open", Boolean(modalView));
         if (modalView) {
@@ -2279,6 +2532,7 @@
         else if (view === "settings") renderSettings();
         else if (view === "bosses") renderBosses(false);
         else if (view === "digitamas") renderBosses(true);
+        else if (view === "digifarm") renderDigifarm();
         else renderHome();
         updateViewportMetrics();
     }
@@ -2884,6 +3138,23 @@
             render();
             void refreshDigitamaCooldowns();
         }
+        else if (action === "view-digifarm") {
+            modalView = "";
+            view = "digifarm";
+            farmStatus = "Consultando incubadoras e Digitamas disponíveis...";
+            render();
+            void loadFarmSlots();
+        }
+        else if (action === "farm-refresh-slots") void loadFarmSlots(true);
+        else if (action === "farm-refresh-eggs") void loadFarmDigitamas();
+        else if (action === "farm-send") void addFarmDigitama();
+        else if (action === "farm-select-digitama") {
+            const digitama = String(target.dataset.digitama || "");
+            if (farmDigitamas.some((item) => item.value === digitama)) {
+                farmSelectedDigitama = digitama;
+                updateFarmDigitamaSelection();
+            }
+        }
         else if (action === "refresh-digitamas") void refreshDigitamaCooldowns(true);
         else if (action === "import-sync") shadow.querySelector("#sync-file")?.click();
         else if (action === "export-sync") exportSyncFile();
@@ -3024,6 +3295,13 @@
             render();
         } else if (event.target.id === "sync-file") {
             void importSyncFile(event.target.files?.[0]);
+        } else if (event.target.id === "farm-slot" && event.target.value !== farmSelectedSlot) {
+            farmSelectedDigitama = "0";
+            farmDigitamas = [];
+            void loadFarmDigitamas(event.target.value);
+        } else if (event.target.id === "farm-digitama") {
+            farmSelectedDigitama = event.target.value;
+            updateFarmDigitamaSelection();
         }
     });
     shadow.addEventListener("click", (event) => {
