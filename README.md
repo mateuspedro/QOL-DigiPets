@@ -6,7 +6,8 @@ O **QOL - Digipets** reúne ferramentas, atalhos, listas pesquisáveis e janelas
 
 O projeto conta com recursos de gerenciamento de mapas e estágios, Boss Rush, Digitamas, Black Trader, troca de costumes e edição de Party, além de diversas opções de personalização.
 
-> **Versão atual:** 1.3.3  
+> **Versão atual:** 1.3.16 
+> Agora é possivel enviar digitama para a digifarm.
 > **Userscript:** [QOL - Digipets.user.js](./QOL%20-%20Digipets.user.js)
 
 ---
@@ -231,6 +232,14 @@ Uma interface para visualizar e gerenciar as formações de Digimons.
 - Oferece pesquisa de Digimons durante a seleção.
 - Disponibiliza ordenação por BP ou tier, quando essas informações estão disponíveis.
 - Destaca visualmente o BP e os tiers reconhecidos para facilitar a comparação.
+
+### 🏡 Enviar à DigiFarm
+
+- Consulta o perfil da conta em segundo plano para obter o identificador necessário ao endpoint do jogo; o ID não é exibido no painel.
+- Lista somente incubadoras vazias e desbloqueadas e carrega os Digitamas disponíveis para a incubadora selecionada.
+- Permite atualizar as incubadoras e os ovos, selecionar um Digitama e enviá-lo à incubadora.
+- Exibe os ovos disponíveis abaixo do formulário; selecionar um item nessa lista também seleciona o Digitama no campo.
+- Após o envio confirmado pelo jogo, atualiza as incubadoras e os ovos. A funcionalidade usa a sessão ativa do DigiPets.
 
 ### ⚙️ Configurações e interface
 
