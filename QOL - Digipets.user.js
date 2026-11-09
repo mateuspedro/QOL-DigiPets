@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         QOL - Digipets
 // @namespace    https://digipets.net/
-// @version      1.3.16
-// @description  Navegação QOL para DigiPets: bosses, Digitamas, DigiFarm, loja, costumes, party e contadores.
+// @version      1.3.18
+// @description  Navegação QOL para DigiPets: bosses, Digitamas, DigiFarm, Market Tracker, loja, costumes, party e contadores.
 // @author       Kizano
 // @match        https://digipets.net/*
 // @run-at       document-idle
@@ -22,7 +22,7 @@
     if (document.getElementById(HOST_ID)) return;
 
     const STORE_KEY = "qolDigipets.state.v1";
-    const CURRENT_VERSION = "1.3.16";
+    const CURRENT_VERSION = "1.3.18";
     const UPDATE_CHECK_KEY = "qolDigipets.updateCheck.v1";
     const UPDATE_CHECK_INTERVAL = 6 * 60 * 60 * 1000;
     const UPDATE_CHECK_TIMEOUT = 8000;
@@ -349,12 +349,14 @@
     const SYNC_COOLDOWN_TTL = 6 * 60 * 60 * 1000;
     const STAGE_FRESH_MS = 6 * 60 * 60 * 1000;
     const DIGITAMA_SYNC_MAX_AGE = 2 * 60 * 1000;
-    const BOSS_RUSH_CACHE_MS = 60 * 1000;
     const BOSS_RUSH_MAX_REFRESHES = 20;
     const BOSS_RUSH_CONCURRENCY = 3;
+    const MARKET_SCAN_INTERVAL = 5 * 60 * 1000;
+    const MARKET_CONFIG_NAME_LIMIT = 100;
+    const MARKET_TIERS = Object.freeze(["E", "D", "C", "B", "A", "S", "SS", "SSS"]);
     const BATTLE_RUSH_BUTTON_ID = "qol-rush-next-button";
     const STATE_DEFAULTS = {
-        version: 2,
+        version: 3,
         countdownSkin: true,
         blockRepeatingPopups: false,
         favoriteStages: [],
@@ -366,6 +368,10 @@
         shopType: "1",
         shopFilter: "maiorpreco",
         shopPage: 1,
+        marketTracker: { digimons: [], items: [] },
+        marketMatches: [],
+        marketLastScanAt: 0,
+        marketBadgeCount: 0,
         stages: {},
         episodes: {}
     };
@@ -392,6 +398,15 @@
     let farmSubmitting = false;
     let farmRequestId = 0;
     let farmStatus = "";
+    let marketTrackerTab = "digimons";
+    let marketEditingId = "";
+    let marketScanRunning = false;
+    let marketScanStatus = "";
+    let marketScanAt = 0;
+    let marketProducts = [];
+    let marketMatches = [];
+    let marketBadgeCount = 0;
+    let marketScanController = null;
     let importRunning = false;
     let searchQuery = "";
     let featureSearch = "";
@@ -485,6 +500,69 @@
             : [];
     }
 
+    function normalizeMarketTracker(value) {
+        const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+        const normalizeList = (entries, type) => Array.isArray(entries)
+            ? entries.map((entry) => {
+                if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+                const name = typeof entry.name === "string" ? entry.name.trim().slice(0, MARKET_CONFIG_NAME_LIMIT) : "";
+                if (!name) return null;
+                const id = typeof entry.id === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(entry.id)
+                    ? entry.id
+                    : "";
+                const rawPrice = entry.maxPrice;
+                const hasPrice = rawPrice !== "" && rawPrice !== null && rawPrice !== undefined;
+                const parsedPrice = Number(rawPrice);
+                if (hasPrice && (!Number.isSafeInteger(parsedPrice) || parsedPrice < 0)) return null;
+                const maxPrice = hasPrice ? parsedPrice : null;
+                return {
+                    id: id || `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+                    name,
+                    maxPrice,
+                    ...(type === "digimons" ? {
+                        tier: MARKET_TIERS.includes(String(entry.tier).toUpperCase())
+                            ? String(entry.tier).toUpperCase()
+                            : "E",
+                        includeHigher: Boolean(entry.includeHigher)
+                    } : {})
+                };
+            }).filter(Boolean)
+            : [];
+        return {
+            digimons: normalizeList(source.digimons, "digimons"),
+            items: normalizeList(source.items, "items")
+        };
+    }
+
+    function normalizeMarketMatches(value) {
+        return Array.isArray(value)
+            ? value.filter((match) => match && typeof match === "object"
+                && ["digimons", "items"].includes(match.type)
+                && typeof match.name === "string"
+                && typeof match.productId === "string")
+                .map((match) => ({
+                    type: match.type,
+                    configId: String(match.configId || ""),
+                    configName: String(match.configName || "").slice(0, MARKET_CONFIG_NAME_LIMIT),
+                    productId: String(match.productId).slice(0, 80),
+                    name: String(match.name).slice(0, 200),
+                    price: String(match.price || "").slice(0, 40),
+                    page: Math.max(1, Number.parseInt(match.page, 10) || 1),
+                    filter: Object.prototype.hasOwnProperty.call(SHOP_FILTER_LABELS, match.filter)
+                        ? match.filter
+                        : "maiorpreco",
+                    priceValue: match.priceValue !== null
+                        && match.priceValue !== undefined
+                        && Number.isSafeInteger(Number(match.priceValue))
+                        ? Number(match.priceValue)
+                        : null,
+                    tierName: MARKET_TIERS.includes(String(match.tierName).toUpperCase())
+                        ? String(match.tierName).toUpperCase()
+                        : ""
+                }))
+            : [];
+    }
+
     function normalizeStoredState(value) {
         if (!value || typeof value !== "object" || Array.isArray(value)) {
             return { ...STATE_DEFAULTS };
@@ -512,9 +590,10 @@
                     ? { ...record, checkedAt: 0 }
                     : record
             ]));
-        if (savedVersion < 2) stateNeedsMigration = true;
+        if (savedVersion < 3) stateNeedsMigration = true;
         return {
             ...STATE_DEFAULTS,
+            version: 3,
             countdownSkin: value.countdownSkin !== false,
             blockRepeatingPopups: Boolean(value.blockRepeatingPopups),
             favoriteStages: normalizeIds(value.favoriteStages),
@@ -530,6 +609,10 @@
             shopType: ["1", "2"].includes(String(value.shopType)) ? String(value.shopType) : "1",
             shopFilter: typeof value.shopFilter === "string" ? value.shopFilter : "maiorpreco",
             shopPage: Math.max(1, Number.parseInt(value.shopPage, 10) || 1),
+            marketTracker: normalizeMarketTracker(value.marketTracker),
+            marketMatches: normalizeMarketMatches(value.marketMatches),
+            marketLastScanAt: Math.max(0, Number(value.marketLastScanAt) || 0),
+            marketBadgeCount: Math.max(0, Number.parseInt(value.marketBadgeCount, 10) || 0),
             stages,
             episodes
         };
@@ -673,7 +756,7 @@
             .toolbar-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
             .intro { margin: 0 0 12px; color: #607487; font-size: 12px; line-height: 1.45; }
             .home-grid { display: grid; gap: 9px; }
-            .home-link { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 13px; border: 1px solid #d5e0e8; border-left: 3px solid #25c8d7; border-radius: 11px; background: linear-gradient(110deg,#142c48,#182a43); color: #effaff; text-align: left; box-shadow: 0 5px 15px #030a1955; }
+            .home-link { position: relative; display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 13px; border: 1px solid #d5e0e8; border-left: 3px solid #25c8d7; border-radius: 11px; background: linear-gradient(110deg,#142c48,#182a43); color: #effaff; text-align: left; box-shadow: 0 5px 15px #030a1955; }
             .home-link span { display: grid; gap: 4px; }
             .home-link small { color: #6b7f90; font-weight: 400; }
             .config-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid #dce5ec; }
@@ -712,6 +795,30 @@
             .farm-digitama-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
             .farm-digitama-item { width: 100%; min-height: 42px; padding: 9px 11px; border-color: #3b5b75; background: linear-gradient(120deg,#172e49,#14213a); color: #c4d9ee; text-align: left; overflow-wrap: anywhere; }
             .farm-digitama-item[aria-pressed="true"] { border-color: #ffe083; background: linear-gradient(120deg,#614a20,#493b38); color: #fff1bd; }
+            .market-notification { position: absolute; top: 6px; right: 7px; display: grid; min-width: 22px; height: 22px; place-items: center; padding: 0 5px; border: 1px solid #ffd1d8; border-radius: 999px; background: #e54862; color: white; font: 800 11px Arial,sans-serif; box-shadow: 0 0 12px #fa466b99; }
+            .market-notification[hidden] { display: none; }
+            .mt-tabs { display: flex; gap: 8px; overflow-x: auto; margin: 0 0 12px; padding: 2px 2px 7px; -webkit-overflow-scrolling: touch; }
+            .mt-tabs button { flex: 1 0 120px; min-height: 44px; border-color: #3b5b75; background: #172a43; color: #b9d8e8; }
+            .mt-tabs button.selected { border-color: #ffe083; background: linear-gradient(135deg,#604817,#47333d); color: #ffe083; }
+            .mt-form, .mt-config-card, .mt-match-card { display: grid; gap: 9px; padding: 12px; border: 1px solid #355a77; border-radius: 10px; background: linear-gradient(125deg,#142b45,#182540); }
+            .mt-form { border-left: 3px solid #25c8d7; }
+            .mt-form label { display: grid; gap: 6px; color: #c4d9ee; font-size: 12px; font-weight: 700; }
+            .mt-form input:not([type="checkbox"]), .mt-form select { width: 100%; min-height: 44px; padding: 9px 10px; border: 1px solid #3b5b75; border-radius: 8px; background: #0b1728; color: #eaf5ff; font: 14px Arial,sans-serif; }
+            .mt-checkbox { display: flex !important; grid-template-columns: auto 1fr; align-items: center; gap: 9px !important; min-height: 44px; }
+            .mt-checkbox input { width: 20px; height: 20px; accent-color: #20c9d3; }
+            .mt-help, .mt-config-card small, .mt-match-card small { color: #9bbbd0; font-size: 11px; line-height: 1.45; }
+            .mt-form-actions, .mt-card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+            .mt-form-actions button, .mt-card-actions button { min-height: 44px; flex: 1 1 120px; }
+            .mt-config-list, .mt-match-list { display: grid; gap: 8px; margin-top: 12px; }
+            .mt-config-card { grid-template-columns: minmax(0,1fr) auto; align-items: center; }
+            .mt-config-copy, .mt-match-copy { display: grid; gap: 4px; min-width: 0; }
+            .mt-config-copy strong, .mt-match-copy strong { color: #effaff; overflow-wrap: anywhere; }
+            .mt-card-actions { justify-content: flex-end; }
+            .mt-card-actions button { flex: 0 0 auto; min-height: 40px; }
+            .mt-section-title { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px; margin: 15px 0 8px; color: #ffe083; font-size: 13px; }
+            .mt-match-card { grid-template-columns: minmax(0,1fr) auto auto; align-items: center; }
+            .mt-match-card > button { min-height: 44px; }
+            .mt-match-price { color: #71f0bd; font-weight: 700; white-space: nowrap; }
             .feature-actions .favorite-action, .stage-actions .favorite-action, .fashion-card-actions .favorite-action { border-color: #718096; background: linear-gradient(135deg,#3b4758,#293449); color: #aeb9c7; }
             button.favorite-action[aria-pressed="true"] { border-color: #ffe083; background: linear-gradient(135deg,#604817,#47333d); color: #ffe083; }
             .favorite-star { color: #9aa7b5; font-size: 17px; line-height: 1; text-shadow: none; vertical-align: -1px; }
@@ -891,6 +998,11 @@
                 .farm-form select { font-size: 16px; }
                 .farm-actions { flex-direction: column; }
                 .farm-actions button { width: 100%; flex-basis: auto; }
+                .mt-config-card, .mt-match-card { grid-template-columns: 1fr; }
+                .mt-match-card > button { width: 100%; }
+                .mt-card-actions { justify-content: stretch; }
+                .mt-card-actions button { flex: 1 1 120px; }
+                .mt-form input:not([type="checkbox"]), .mt-form select { font-size: 16px; }
                 #toast { right: max(12px,env(safe-area-inset-right)); bottom: max(72px,calc(env(safe-area-inset-bottom) + 60px)); max-width: calc(100vw - 24px); }
             }
             @media (max-width: 360px) {
@@ -1194,9 +1306,32 @@
         }
     }
 
+    function hasCachedBossCooldown(entry) {
+        const episode = state.episodes[String(entry.episode)];
+        const episodeCheckedAt = Number(episode?.checkedAt) || 0;
+        if (!episodeCheckedAt
+            || Date.now() - episodeCheckedAt < 0
+            || Date.now() - episodeCheckedAt > STAGE_FRESH_MS) return false;
+        return entry.bosses.every((item) => {
+            const record = state.stages[item.stage];
+            const checkedAt = Number(record?.checkedAt) || 0;
+            return Number(record?.episode) === entry.episode
+                && checkedAt > 0
+                && Date.now() - checkedAt >= 0
+                && Date.now() - checkedAt <= STAGE_FRESH_MS
+                && record.remainingKnown
+                && !record.available
+                && Number(record.expiresAt) > Date.now();
+        });
+    }
+
     async function continueBossRush(currentStage = "") {
         if (bossRushAdvanceRunning) {
             showToast("A consulta do próximo boss já está em andamento.");
+            return;
+        }
+        if (marketScanRunning) {
+            showToast("Aguarde a verificação do Market Tracker terminar antes de continuar o Rush.");
             return;
         }
         if (syncRunning || digitamaSyncRunning || stageCooldownSyncRunning) {
@@ -1223,69 +1358,30 @@
 
         bossRushAdvanceRunning = true;
         setBossRushAdvanceBusy(true);
-        featureStatus = "Consultando cooldowns no jogo para localizar o próximo boss disponível…";
+        featureStatus = "Atualizando os cooldowns no jogo antes de escolher o próximo boss…";
         if (panel.classList.contains("open") && view === "bosses" && !modalView) render();
 
-        const work = Array.from(episodes, ([episode, bosses]) => {
-            const episodeCheckedAt = Number(state.episodes[String(episode)]?.checkedAt) || 0;
-            const episodeAge = Date.now() - episodeCheckedAt;
-            const recentlyChecked = episodeCheckedAt > 0
-                && episodeAge >= 0
-                && episodeAge < BOSS_RUSH_CACHE_MS
-                && bosses.every((item) => {
-                    const record = state.stages[item.stage];
-                    const age = Date.now() - Number(record?.checkedAt || 0);
-                    return Number(record?.episode) === episode
-                        && age >= 0
-                        && age < BOSS_RUSH_CACHE_MS;
-                });
-            const cachedReady = recentlyChecked
-                ? bosses.find((item) => stageReadiness(item.stage).ready)
-                : null;
-            const coolingDown = bosses.every((item) => {
-                const readiness = stageReadiness(item.stage);
-                return readiness.fresh && readiness.remaining !== null && readiness.remaining > 0;
-            });
-            return {
-                episode,
-                bosses,
-                cachedReady,
-                cachedCoolingDown: !cachedReady && coolingDown
-            };
-        });
-
-        let refreshedEpisodes = 0;
+        const work = Array.from(episodes, ([episode, bosses]) => ({ episode, bosses }));
         let index = 0;
+        let refreshedEpisodes = 0;
+        let firstFailedEpisode = 0;
         const failures = [];
         const verifiedEpisodes = new Set();
         const verifiedStageIds = new Set();
         try {
-            while (index < work.length) {
-                const entry = work[index];
-                if (entry.cachedReady) {
-                    window.location.href = `/batalha?estagio=${encodeURIComponent(entry.cachedReady.stage)}#DP`;
-                    return;
-                }
-                if (entry.cachedCoolingDown) {
-                    verifiedEpisodes.add(entry.episode);
-                    entry.bosses.forEach((item) => verifiedStageIds.add(item.stage));
-                    index += 1;
-                    continue;
-                }
-                if (refreshedEpisodes >= BOSS_RUSH_MAX_REFRESHES) break;
-
+            while (index < work.length && refreshedEpisodes < BOSS_RUSH_MAX_REFRESHES) {
+                const batchStart = index;
                 const batch = [];
                 while (index < work.length
                     && batch.length < BOSS_RUSH_CONCURRENCY
                     && refreshedEpisodes + batch.length < BOSS_RUSH_MAX_REFRESHES) {
                     const candidate = work[index];
-                    if (candidate.cachedCoolingDown) {
+                    if (hasCachedBossCooldown(candidate)) {
                         verifiedEpisodes.add(candidate.episode);
                         candidate.bosses.forEach((item) => verifiedStageIds.add(item.stage));
                         index += 1;
                         continue;
                     }
-                    if (candidate.cachedReady) break;
                     batch.push(candidate);
                     index += 1;
                 }
@@ -1309,12 +1405,12 @@
                                 throw new Error(`O episódio ${candidate.episode} não retornou o estágio de boss esperado.`);
                             }
                             saveState();
-                            return { candidate, matchedBosses };
+                            return { candidate, result, matchedBosses };
                         } catch (error) {
                             const message = error?.name === "AbortError" ? "tempo esgotado" : (error?.message || "falha inesperada");
                             failures.push({ episode: candidate.episode, message });
                             console.error(`[QOL - Digipets] Não foi possível consultar o episódio ${candidate.episode} para o Boss Rush.`, error);
-                            return { candidate, matchedBosses: [] };
+                            return { candidate, result: null, matchedBosses: [] };
                         } finally {
                             clearTimeout(timeout);
                         }
@@ -1322,17 +1418,32 @@
                 }
 
                 const results = await Promise.all(requests);
-                for (const { candidate, matchedBosses } of results) {
-                    if (!matchedBosses.length) continue;
+                let failedAtIndex = -1;
+                for (let resultIndex = 0; resultIndex < results.length; resultIndex += 1) {
+                    const { candidate, result, matchedBosses } = results[resultIndex];
+                    if (!result || !matchedBosses.length) {
+                        failedAtIndex = batchStart + resultIndex;
+                        firstFailedEpisode = candidate.episode;
+                        break;
+                    }
                     verifiedEpisodes.add(candidate.episode);
                     matchedBosses.forEach((item) => verifiedStageIds.add(item.stage));
-                    const nextReady = matchedBosses.find((item) => stageReadiness(item.stage).ready);
+                    const freshBossStages = result.stages.filter((stage) =>
+                        matchedBosses.some((item) => item.stage === String(stage.stage))
+                        && stage.available
+                        && (!stage.remainingKnown || Number(stage.remainingSeconds) <= 0));
+                    const nextReady = matchedBosses.find((item) =>
+                        freshBossStages.some((stage) => String(stage.stage) === item.stage));
                     if (nextReady) {
                         saveState();
                         featureStatus = `${nextReady.name} está disponível. Abrindo o estágio ${nextReady.stage}…`;
                         window.location.href = `/batalha?estagio=${encodeURIComponent(nextReady.stage)}#DP`;
                         return;
                     }
+                }
+                if (failedAtIndex >= 0) {
+                    index = failedAtIndex;
+                    break;
                 }
             }
 
@@ -1346,16 +1457,17 @@
                     verifiedEpisodes.has(episode) && verifiedStageIds.has(item.stage))
                 .filter(({ readiness }) => readiness.fresh && readiness.remaining > 0)
                 .sort((left, right) => left.readiness.remaining - right.readiness.remaining)[0];
-            const hasUnverifiedEpisodes = index < work.length;
+            const hasUnverifiedEpisodes = Boolean(firstFailedEpisode) || index < work.length;
             if (failures.length) {
-                featureStatus = `Não foi possível confirmar a disponibilidade de ${failures.length} episódio(s). Tente novamente com a página do jogo carregada.`;
+                featureStatus = `Não foi possível confirmar a disponibilidade do episódio ${firstFailedEpisode || "consultado"}. Tente novamente; o Rush não abrirá um estágio sem confirmação atual.`;
             } else if (hasUnverifiedEpisodes) {
-                featureStatus = `Consultados ${refreshedEpisodes} episódios; toque novamente em “Continuar Rush Boss” para continuar.`;
+                featureStatus = `Cooldowns atualizados em ${refreshedEpisodes} episódio(s). Toque novamente em “Continuar Rush Boss” para verificar os próximos sem reutilizar dados antigos.`;
             } else if (nearestCooldown) {
                 featureStatus = `Nenhum boss disponível. Mais próximo: ${nearestCooldown.item.name} · ${formatRemaining(nearestCooldown.readiness.remaining)}.`;
             } else {
                 featureStatus = "Nenhum boss disponível foi encontrado nos episódios consultados.";
             }
+            saveState();
             showToast(featureStatus);
         } finally {
             bossRushAdvanceRunning = false;
@@ -1542,7 +1654,7 @@
                 <div class="feature-copy"><strong>${escapeHtml(item.name || `Estágio ${id}`)}</strong>
                     <small>Estágio ${escapeHtml(id)}${item.episode ? ` · Episódio ${escapeHtml(item.episode)}` : ""}${item.bp ? ` · BP ${escapeHtml(item.bp)}` : ""}${!isDigitama && item.cooldown ? ` · CD cadastrado ${escapeHtml(item.cooldown)} min` : ""} · <span class="boss-cooldown" data-expiry="${Number(state.stages[id]?.expiresAt) || 0}" data-available="${Boolean(state.stages[id]?.available)}" data-unknown="${readiness.remaining === null}" data-stale="${!readiness.fresh}" data-stale-label="${escapeHtml(!isDigitama && item.cooldown ? `CD atual n/d · catálogo ${item.cooldown} min` : "CD desatualizado")}" data-stage="${escapeHtml(id)}">${escapeHtml(timer)}</span></small></div>
                 <div class="feature-actions">
-                    <button class="green" type="button" data-action="${stageAction}" data-stage="${escapeHtml(id)}" ${coolingDown || refreshing || !item.episode || bossRushAdvanceRunning ? "disabled" : ""}>${stageActionText}</button>
+                    <button class="green" type="button" data-action="${stageAction}" data-stage="${escapeHtml(id)}" ${coolingDown || refreshing || !item.episode || bossRushAdvanceRunning || marketScanRunning ? "disabled" : ""}>${stageActionText}</button>
                     <button class="${alert ? "green" : "gray"}" type="button" data-action="toggle-boss-alert" data-stage="${escapeHtml(id)}" aria-pressed="${alert}">${alert ? "🔔 Alarme ativo" : "🔕 Alarme"}</button>
                     <button class="favorite-action" type="button" data-action="toggle-boss-favorite" data-stage="${escapeHtml(id)}" aria-pressed="${favorite}"><span class="favorite-star" aria-hidden="true">★</span> ${favorite ? "Favorito" : "Favoritar"}</button>
                     ${item.episode ? `<button class="stage-map-button" type="button" data-action="open-episode" data-episode="${escapeHtml(item.episode)}">🗺️ Mapa</button>` : ""}
@@ -1554,14 +1666,14 @@
         const syncNote = isDigitama
             ? "Ao abrir esta tela, o mapa de Digitamas (episódio 53) é consultado para atualizar os cooldowns."
             : `Catálogo completo de ${items.length} bosses. O mapeamento é integrado; atualize cada cooldown pelo jogo ou sincronize os episódios.`;
-        const rushSyncBlocked = syncRunning || digitamaSyncRunning || stageCooldownSyncRunning;
+        const rushSyncBlocked = marketScanRunning || syncRunning || digitamaSyncRunning || stageCooldownSyncRunning;
         const rushButtonDisabled = bossRushAdvanceRunning || rushSyncBlocked;
         const rushButtonText = bossRushAdvanceRunning
             ? "Consultando cooldowns…"
             : rushSyncBlocked ? "Aguarde a sincronização…" : "⚔️ Continuar Rush Boss";
         content.innerHTML = `
             <div class="toolbar"><button class="gray" data-action="home">← Início</button><strong>${header}</strong><div class="toolbar-actions">
-                ${!isDigitama ? `<button class="green" data-action="next-boss" ${rushButtonDisabled ? "disabled" : ""}>${rushButtonText}</button>` + '<button class="gray" data-action="sync-stages" ' + (syncRunning || digitamaSyncRunning || stageCooldownSyncRunning || bossRushAdvanceRunning ? "disabled" : "") + '>' + (syncRunning ? "Sync…" : "Sync mapas") + '</button>' : '<button class="green" data-action="refresh-digitamas" ' + (digitamaSyncRunning || syncRunning || stageCooldownSyncRunning || bossRushAdvanceRunning ? "disabled" : "") + '>' + (digitamaSyncRunning ? "Atualizando…" : "Atualizar CD") + '</button>'}
+                ${!isDigitama ? `<button class="green" data-action="next-boss" ${rushButtonDisabled ? "disabled" : ""}>${rushButtonText}</button>` + '<button class="gray" data-action="sync-stages" ' + (marketScanRunning || syncRunning || digitamaSyncRunning || stageCooldownSyncRunning || bossRushAdvanceRunning ? "disabled" : "") + '>' + (syncRunning ? "Sync…" : "Sync mapas") + '</button>' : '<button class="green" data-action="refresh-digitamas" ' + (marketScanRunning || digitamaSyncRunning || syncRunning || stageCooldownSyncRunning || bossRushAdvanceRunning ? "disabled" : "") + '>' + (digitamaSyncRunning ? "Atualizando…" : "Atualizar CD") + '</button>'}
             </div></div>
             <p class="intro">${escapeHtml(syncNote)} Os alarmes são locais e verificam os cooldowns enquanto o DigiPets está aberto.</p>
             ${!isDigitama ? '<button class="gray" type="button" data-action="show-ignored">Exibir bosses ignorados</button>' : ""}
@@ -1955,7 +2067,7 @@
         return filters;
     }
 
-    function parseShopListing(html, type) {
+    function parseShopListing(html, type, filter = state.shopFilter, currentPage = state.shopPage) {
         const parsed = new DOMParser().parseFromString(html, "text/html");
         const products = Array.from(parsed.querySelectorAll("table tbody tr")).map((row) => {
             const cells = row.querySelectorAll("td");
@@ -1991,18 +2103,385 @@
             };
         }).filter(Boolean);
         const filters = parseShopFilters(parsed.querySelectorAll('select[name="filtro"] option'));
-        let pages = state.shopPage;
+        let pages = Math.max(1, Number(currentPage) || 1);
         for (const link of parsed.querySelectorAll('a[href*="pagina="]')) {
             try {
                 const url = new URL(link.getAttribute("href"), location.href);
-                if (url.searchParams.get("tipo") === type && url.searchParams.get("filtro") === state.shopFilter) {
+                if (url.searchParams.get("tipo") === type && url.searchParams.get("filtro") === filter) {
                     pages = Math.max(pages, Number(url.searchParams.get("pagina")) || pages);
                 }
             } catch (error) {
                 console.warn("[QOL - Digipets] Pagina\u00e7ão da loja inválida.", error);
             }
         }
-        return { products, filters, pages };
+        return { products, filters, pages, hasListingTable: Boolean(parsed.querySelector("table tbody")) };
+    }
+
+    function normalizeMarketName(value) {
+        return String(value || "")
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .toLocaleLowerCase("pt-BR")
+            .trim();
+    }
+
+    function parseMarketPrice(value) {
+        const digits = String(value || "").replace(/[^\d]/g, "");
+        if (!digits) return null;
+        const price = Number(digits);
+        return Number.isSafeInteger(price) ? price : null;
+    }
+
+    function getMarketMatches(products, tracker = state.marketTracker) {
+        const matches = [];
+        for (const product of products) {
+            const configs = tracker[product.type] || [];
+            const normalizedName = normalizeMarketName(product.name);
+            const priceValue = parseMarketPrice(product.price);
+            for (const config of configs) {
+                if (!normalizedName.includes(normalizeMarketName(config.name))) continue;
+                if (config.maxPrice !== null
+                    && (priceValue === null || priceValue > config.maxPrice)) continue;
+                if (product.type === "digimons") {
+                    const selectedTier = MARKET_TIERS.indexOf(config.tier);
+                    const productTier = MARKET_TIERS.indexOf(product.tierName);
+                    if (productTier < 0 || selectedTier < 0) continue;
+                    const tierAllowed = config.includeHigher
+                        ? productTier >= selectedTier
+                        : productTier === selectedTier;
+                    if (!tierAllowed) continue;
+                }
+                matches.push({
+                    type: product.type,
+                    configId: config.id,
+                    configName: config.name,
+                    productId: product.id,
+                    name: product.name,
+                    price: product.price,
+                    priceValue,
+                    page: product.page,
+                    filter: product.filter,
+                    tierName: product.tierName || ""
+                });
+            }
+        }
+        return matches;
+    }
+
+    async function fetchMarketPage(shopType, filter, page, signal) {
+        await waitForSyncGap();
+        if (signal.aborted) throw new DOMException("A varredura foi cancelada.", "AbortError");
+        const timeout = window.setTimeout(() => marketScanController?.abort(), FETCH_TIMEOUT);
+        lastSyncRequestAt = Date.now();
+        try {
+            const params = new URLSearchParams({ tipo: shopType, filtro: filter, pagina: String(page) });
+            const response = await fetch(`/shop_blacktrader?${params}`, {
+                credentials: "same-origin",
+                cache: "no-store",
+                headers: { Accept: "text/html" },
+                signal
+            });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            if (/\/(?:login|entrar)(?:[/?#]|$)/i.test(new URL(response.url || location.href).pathname)) {
+                throw new Error("A sessão do DigiPets expirou; entre novamente e repita a varredura.");
+            }
+            const listing = parseShopListing(await response.text(), shopType, filter, page);
+            if (!listing.hasListingTable) {
+                throw new Error("A resposta da Black Trader não contém a lista esperada; verifique a sessão do DigiPets.");
+            }
+            return {
+                ...listing,
+                products: listing.products.map((item) => ({
+                    ...item,
+                    type: shopType === "1" ? "digimons" : "items",
+                    page,
+                    filter
+                }))
+            };
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
+    async function loadMarketType(type, signal) {
+        const shopType = type === "digimons" ? "1" : "2";
+        let filter = "maiorpreco";
+        let first = await fetchMarketPage(shopType, filter, 1, signal);
+        if (first.filters.length && !first.filters.some((item) => item.value === filter)) {
+            filter = first.filters[0].value;
+            first = await fetchMarketPage(shopType, filter, 1, signal);
+        }
+        const products = [...first.products];
+        const seen = new Set(products.map((item) => item.id));
+        let pages = Math.max(1, first.pages);
+        for (let page = 2; page <= pages; page += 1) {
+            marketScanStatus = `Verificando ${type === "digimons" ? "Digimons" : "itens"}: página ${page}/${pages}…`;
+            if (view === "market-tracker" && panel.classList.contains("open")) render();
+            const listing = await fetchMarketPage(shopType, filter, page, signal);
+            pages = Math.max(pages, listing.pages);
+            for (const product of listing.products) {
+                if (seen.has(product.id)) continue;
+                seen.add(product.id);
+                products.push(product);
+            }
+        }
+        return products;
+    }
+
+    function getMarketConfigCount() {
+        return state.marketTracker.digimons.length + state.marketTracker.items.length;
+    }
+
+    function loadMarketNotifications() {
+        if (!getMarketConfigCount()) {
+            marketMatches = [];
+            marketBadgeCount = 0;
+            if (state.marketMatches.length || state.marketBadgeCount) {
+                state.marketMatches = [];
+                state.marketBadgeCount = 0;
+                state.marketLastScanAt = 0;
+                marketScanAt = 0;
+                saveState();
+            }
+            return;
+        }
+        marketMatches = normalizeMarketMatches(state.marketMatches);
+        marketBadgeCount = marketMatches.length;
+        if (state.marketBadgeCount !== marketBadgeCount) {
+            state.marketBadgeCount = marketBadgeCount;
+            saveState();
+        }
+        if (getMarketConfigCount() && isSafeSyncPage()
+            && (!marketScanAt || Date.now() - marketScanAt >= MARKET_SCAN_INTERVAL)) {
+            void scanMarket();
+        }
+    }
+
+    async function scanMarket(force = false) {
+        if (marketScanRunning) {
+            if (view === "market-tracker") {
+                marketScanStatus = "A varredura da loja já está em andamento.";
+                render();
+            }
+            return;
+        }
+        if (!getMarketConfigCount()) {
+            marketScanStatus = "Adicione ao menos uma configuração para iniciar a varredura.";
+            marketMatches = [];
+            marketBadgeCount = 0;
+            state.marketMatches = [];
+            state.marketBadgeCount = 0;
+            state.marketLastScanAt = 0;
+            marketScanAt = 0;
+            saveState();
+            return;
+        }
+        if (!isSafeSyncPage()) {
+            marketScanStatus = "A verificação do mercado fica pausada durante batalha e coleta; tente novamente fora dessas telas.";
+            if (view === "market-tracker" && panel.classList.contains("open")) render();
+            return;
+        }
+        if (!force && marketScanAt && Date.now() - marketScanAt < MARKET_SCAN_INTERVAL) {
+            marketScanStatus = `Última varredura: ${new Date(marketScanAt).toLocaleString("pt-BR")} · ${marketMatches.length} correspondência(s).`;
+            return;
+        }
+        if (bossRushAdvanceRunning || syncRunning || digitamaSyncRunning || stageCooldownSyncRunning) {
+            marketScanStatus = "Aguarde a sincronização atual terminar para verificar a loja.";
+            if (view === "market-tracker") render();
+            return;
+        }
+
+        marketScanRunning = true;
+        marketScanController = new AbortController();
+        const controller = marketScanController;
+        marketScanStatus = "Consultando todas as páginas da Black Trader…";
+        if (view === "market-tracker") render();
+        try {
+            const products = [];
+            for (const type of ["digimons", "items"]) {
+                products.push(...await loadMarketType(type, controller.signal));
+            }
+            if (controller.signal.aborted) throw new DOMException("A varredura foi cancelada.", "AbortError");
+            marketProducts = products;
+            marketMatches = getMarketMatches(products);
+            marketScanAt = Date.now();
+            marketBadgeCount = marketMatches.length;
+            state.marketMatches = marketMatches;
+            state.marketLastScanAt = marketScanAt;
+            state.marketBadgeCount = marketBadgeCount;
+            marketScanStatus = `Varredura concluída em todas as páginas · ${products.length} anúncio(s) · ${marketMatches.length} correspondência(s) · ${new Date(marketScanAt).toLocaleString("pt-BR")}.`;
+            saveState();
+        } catch (error) {
+            console.error("[QOL - Digipets] Falha ao verificar a Black Trader para o Market Tracker.", error);
+            marketScanStatus = `Não foi possível concluir a varredura: ${error.message || "erro inesperado"}. As correspondências da última consulta foram mantidas.`;
+        } finally {
+            if (marketScanController === controller) marketScanController = null;
+            marketScanRunning = false;
+            if (panel.classList.contains("open") && ["home", "market-tracker"].includes(view)) render();
+        }
+    }
+
+    function saveMarketConfig() {
+        const name = content.querySelector("#mt-name")?.value.trim().slice(0, MARKET_CONFIG_NAME_LIMIT) || "";
+        const rawPrice = content.querySelector("#mt-price")?.value.trim() || "";
+        const tier = String(content.querySelector("#mt-tier")?.value || "E").toUpperCase();
+        const includeHigher = Boolean(content.querySelector("#mt-higher-tiers")?.checked);
+        if (!name) {
+            showToast("Informe o nome do Digimon ou item.");
+            content.querySelector("#mt-name")?.focus();
+            return;
+        }
+        if (rawPrice && (!/^\d+$/.test(rawPrice) || !Number.isSafeInteger(Number(rawPrice)))) {
+            showToast("O valor pretendido deve ser um número inteiro igual ou maior que zero.");
+            content.querySelector("#mt-price")?.focus();
+            return;
+        }
+        if (marketTrackerTab === "digimons" && !MARKET_TIERS.includes(tier)) {
+            showToast("Selecione um tier válido para o Digimon.");
+            return;
+        }
+        const entries = state.marketTracker[marketTrackerTab];
+        const editing = entries.find((item) => item.id === marketEditingId);
+        const config = {
+            id: editing?.id || `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+            name,
+            maxPrice: rawPrice ? Number(rawPrice) : null,
+            ...(marketTrackerTab === "digimons" ? { tier, includeHigher } : {})
+        };
+        state.marketTracker[marketTrackerTab] = editing
+            ? entries.map((item) => item.id === editing.id ? config : item)
+            : [...entries, config];
+        marketEditingId = "";
+        state.marketMatches = [];
+        state.marketBadgeCount = 0;
+        state.marketLastScanAt = 0;
+        marketMatches = [];
+        marketBadgeCount = 0;
+        marketScanAt = 0;
+        const saved = saveState();
+        marketScanStatus = saved
+            ? "Configuração salva. Atualizando a loja para encontrar correspondências…"
+            : "Não foi possível salvar a configuração.";
+        render();
+        if (saved) void scanMarket(true);
+    }
+
+    function deleteMarketConfig(id) {
+        const entries = state.marketTracker[marketTrackerTab];
+        if (!entries.some((item) => item.id === id)) return;
+        state.marketTracker[marketTrackerTab] = entries.filter((item) => item.id !== id);
+        if (marketEditingId === id) marketEditingId = "";
+        state.marketMatches = [];
+        state.marketBadgeCount = 0;
+        state.marketLastScanAt = 0;
+        marketMatches = [];
+        marketBadgeCount = 0;
+        marketScanAt = 0;
+        const saved = saveState();
+        marketScanStatus = saved
+            ? "Configuração removida. Atualizando os resultados…"
+            : "A configuração foi removida nesta sessão, mas não pôde ser salva.";
+        render();
+        if (saved && getMarketConfigCount()) void scanMarket(true);
+    }
+
+    function renderMarketTracker() {
+        const type = marketTrackerTab;
+        const entries = state.marketTracker[type];
+        const editing = entries.find((item) => item.id === marketEditingId);
+        const matches = marketMatches.filter((match) => match.type === type);
+        const configCards = entries.length
+            ? entries.map((config) => {
+                const configMatches = matches.filter((match) => match.configId === config.id).length;
+                const priceLabel = config.maxPrice === null
+                    ? "Sem limite de preço · alerta qualquer valor"
+                    : `Até ${config.maxPrice.toLocaleString("pt-BR")} bits`;
+                const tierLabel = type === "digimons"
+                    ? ` · Tier ${config.tier}${config.includeHigher ? " e tiers maiores" : ""}`
+                    : "";
+                return `<article class="mt-config-card">
+                    <div class="mt-config-copy"><strong>${escapeHtml(config.name)}</strong><small>${escapeHtml(priceLabel + tierLabel)} · ${configMatches} correspondência(s)</small></div>
+                    <div class="mt-card-actions">
+                        <button class="gray" type="button" data-action="mt-edit" data-id="${escapeHtml(config.id)}">Editar</button>
+                        <button class="red" type="button" data-action="mt-delete" data-id="${escapeHtml(config.id)}">Remover</button>
+                    </div>
+                </article>`;
+            }).join("")
+            : `<div class="status">Ainda não há alertas nesta aba. Cadastre uma configuração abaixo.</div>`;
+        const matchCards = matches.length
+            ? matches.map((match) => `<article class="mt-match-card">
+                <div class="mt-match-copy"><strong>${escapeHtml(match.name)}</strong><small>Encontrado por “${escapeHtml(match.configName)}”${match.type === "digimons" ? ` · Tier ${escapeHtml(match.tierName || "n/d")}` : ""}</small></div>
+                <span class="mt-match-price">${escapeHtml(match.price)} bits</span>
+                <button class="gray" type="button" data-action="mt-open-shop" data-type="${escapeHtml(match.type)}" data-id="${escapeHtml(match.productId)}">Abrir na loja</button>
+            </article>`).join("")
+            : `<div class="status">${marketScanRunning ? "A varredura está em andamento." : "Nenhum anúncio corresponde às configurações desta aba na última consulta."}</div>`;
+        const scanSummary = marketScanAt
+            ? `Última consulta: ${new Date(marketScanAt).toLocaleString("pt-BR")} · ${marketMatches.length} correspondência(s) no total.`
+            : "A loja ainda não foi consultada nesta sessão.";
+        modalContent.innerHTML = "";
+        content.innerHTML = `
+            <div class="toolbar">
+                <button class="gray" type="button" data-action="home">← Início</button>
+                <strong>📈 MT · Market Tracker</strong>
+                <div class="toolbar-actions">
+                    <button class="gray" type="button" data-action="mt-scan" ${marketScanRunning ? "disabled" : ""}>${marketScanRunning ? "Verificando…" : "Verificar loja"}</button>
+                </div>
+            </div>
+            <p class="intro">Receba um indicador quando a Black Trader anunciar Digimons ou itens que correspondam aos seus alertas.</p>
+            <nav class="mt-tabs" aria-label="Tipo de alerta">
+                <button class="${type === "digimons" ? "selected" : ""}" type="button" data-action="mt-tab" data-type="digimons" aria-pressed="${type === "digimons"}">🐉 Digimons</button>
+                <button class="${type === "items" ? "selected" : ""}" type="button" data-action="mt-tab" data-type="items" aria-pressed="${type === "items"}">🧰 Itens</button>
+            </nav>
+            <div class="status" role="status" aria-live="polite">${escapeHtml(marketScanStatus || scanSummary)}</div>
+            <section class="mt-form" aria-label="${type === "digimons" ? "Configuração de alerta de Digimon" : "Configuração de alerta de item"}">
+                <label for="mt-name">${type === "digimons" ? "Nome do Digimon" : "Nome do item"}
+                    <input id="mt-name" type="text" maxlength="${MARKET_CONFIG_NAME_LIMIT}" value="${escapeHtml(editing?.name || "")}" placeholder="${type === "digimons" ? "Ex.: NeoMyotismon" : "Ex.: Master"}" autocomplete="off">
+                </label>
+                <label for="mt-price">Valor pretendido (bits)
+                    <input id="mt-price" type="number" min="0" step="1" inputmode="numeric" value="${editing?.maxPrice ?? ""}" placeholder="Sem limite de valor">
+                </label>
+                ${type === "digimons" ? `<label for="mt-tier">Tier
+                    <select id="mt-tier">${MARKET_TIERS.map((tier) => `<option value="${tier}" ${tier === (editing?.tier || "E") ? "selected" : ""}>${tier}</option>`).join("")}</select>
+                </label>
+                <label class="mt-checkbox" for="mt-higher-tiers">
+                    <input id="mt-higher-tiers" type="checkbox" ${editing?.includeHigher ? "checked" : ""}>
+                    <span>Considerar tiers maiores</span>
+                </label>` : ""}
+                <small class="mt-help">${editing?.maxPrice === null || !editing
+                    ? "Se o valor ficar vazio, qualquer preço será aceito; o nome e, para Digimons, o tier continuam sendo aplicados."
+                    : "O alerta considera anúncios com preço igual ou menor ao valor definido."}</small>
+                <div class="mt-form-actions">
+                    <button class="green" type="button" data-action="mt-save">${editing ? "Salvar alterações" : "Adicionar alerta"}</button>
+                    ${editing ? '<button class="gray" type="button" data-action="mt-cancel-edit">Cancelar</button>' : ""}
+                </div>
+            </section>
+            <h3 class="mt-section-title"><span>Configurações</span><small>${entries.length} alerta(s)</small></h3>
+            <div class="mt-config-list">${configCards}</div>
+            <h3 class="mt-section-title"><span>Anúncios correspondentes</span><small>${matches.length} anúncio(s)</small></h3>
+            <div class="mt-match-list">${matchCards}</div>
+            <div class="mt-help">A varredura percorre todas as páginas da loja e se repete a cada cinco minutos enquanto o userscript estiver aberto. O indicador reflete as correspondências atuais; use <b>Abrir na loja</b> para ir à categoria, página e pesquisa do anúncio.</div>
+        `;
+    }
+
+    function openMarketMatchInShop(type, productId) {
+        if (!["digimons", "items"].includes(type)) return;
+        const match = marketMatches.find((item) => item.type === type && item.productId === String(productId));
+        if (!match) {
+            showToast("Este anúncio não está mais disponível nas correspondências do MT.");
+            return;
+        }
+        state.shopType = type === "digimons" ? "1" : "2";
+        state.shopFilter = Object.prototype.hasOwnProperty.call(SHOP_FILTER_LABELS, match.filter)
+            ? match.filter
+            : "maiorpreco";
+        state.shopPage = Math.max(1, Number.parseInt(match.page, 10) || 1);
+        featureSearch = match.name;
+        featureStatus = "";
+        shopProducts = [];
+        shopConfirmProduct = null;
+        saveState();
+        openFeatureModal("shop");
+        void loadShop();
     }
 
     async function loadShop() {
@@ -2017,6 +2496,7 @@
             });
             const response = await fetch(`/shop_blacktrader?${query}`, {
                 credentials: "same-origin",
+                cache: "no-store",
                 headers: { Accept: "text/html" }
             });
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -2110,6 +2590,7 @@
     async function fetchEpisode(episode, signal) {
         const response = await fetch(`/estagios?episodio=${encodeURIComponent(episode)}`, {
             credentials: "same-origin",
+            cache: "no-store",
             signal
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -2119,7 +2600,7 @@
     }
 
     async function refreshStageCooldown(stageId) {
-        if (syncRunning || digitamaSyncRunning || stageCooldownSyncRunning || bossRushAdvanceRunning) {
+        if (syncRunning || digitamaSyncRunning || stageCooldownSyncRunning || bossRushAdvanceRunning || marketScanRunning) {
             showToast("Já existe uma consulta de cooldown em andamento. Aguarde ela terminar.");
             return;
         }
@@ -2164,6 +2645,7 @@
     }
 
     function renderHome() {
+        loadMarketNotifications();
         content.innerHTML = `
             <p class="intro">Qualidade de vida para o DigiPets: navega\u00e7ão de bosses e Digitamas, envio à DigiFarm, loja e contadores.</p>
             <div class="home-grid">
@@ -2171,6 +2653,7 @@
                 <button class="home-link" type="button" data-action="view-bosses"><span><strong>⚔️ Boss Rush</strong><small>${BOSS_CATALOG.length} bosses no catálogo · alarmes, favoritos e ignorar</small></span><b>›</b></button>
                 <button class="home-link" type="button" data-action="view-digitamas"><span><strong>🥚 Digitamas</strong><small>Consultar cooldowns e abrir estágios</small></span><b>›</b></button>
                 <button class="home-link" type="button" data-action="view-digifarm"><span><strong>🏡 Enviar à DigiFarm</strong><small>Selecionar ovos e enviar para uma incubadora livre</small></span><b>›</b></button>
+                <button class="home-link" type="button" data-action="view-market-tracker"><span><strong>📈 MT · Market Tracker</strong><small>Alertas de preço para Digimons e itens</small></span><b>›</b><span class="market-notification" ${marketBadgeCount ? "" : "hidden"} aria-label="${marketBadgeCount} anúncio(s) correspondentes">${marketBadgeCount > 99 ? "99+" : marketBadgeCount}</span></button>
                 <button class="home-link" type="button" data-action="view-shop"><span><strong>🛒 Loja Black Trader</strong><small>Pesquisar produtos e comprar com confirma\u00e7ão</small></span><b>›</b></button>
                 <button class="home-link" type="button" data-action="view-fashion"><span><strong>👕 Trocar Costume</strong><small>Escolher roupa e guardar favoritos</small></span><b>›</b></button>
                 <button class="home-link" type="button" data-action="view-party"><span><strong>👥 Editar Party</strong><small>Trocar membros, remover Digimons e ativar forma\u00e7ão</small></span><b>›</b></button>
@@ -2228,7 +2711,7 @@
             <div class="toolbar"><button class="gray" data-action="home">← Início</button><strong>Mapas e estágios</strong><div class="toolbar-actions">
                 <button class="gray" data-action="import-sync">⬆ Importar sync</button>
                 <button class="gray" data-action="export-sync" ${Object.keys(state.episodes).length ? "" : "disabled"}>⬇ Exportar</button>
-                <button class="green" data-action="sync-stages" ${syncRunning || digitamaSyncRunning || stageCooldownSyncRunning || bossRushAdvanceRunning ? "disabled" : ""}>${syncRunning ? "Sincronizando…" : "Atualizar mapas"}</button>
+                <button class="green" data-action="sync-stages" ${marketScanRunning || syncRunning || digitamaSyncRunning || stageCooldownSyncRunning || bossRushAdvanceRunning ? "disabled" : ""}>${syncRunning ? "Sincronizando…" : "Atualizar mapas"}</button>
             </div></div>
             <p class="intro">O mapeamento de episódios e estágios já vem integrado. Use <b>Mapa</b> para consultar o jogo e atualizar os cooldowns; importar um sync é opcional.</p>
             <input class="search" id="stage-search" type="search" placeholder="Buscar por nome, estágio ou episódio" value="${escapeHtml(searchQuery)}">
@@ -2268,7 +2751,7 @@
             </div>
             <div class="config-row">
                 <div class="config-copy"><strong>Sincronizar estágios</strong><small>O mapeamento já vem integrado. Consulta até ${SYNC_BATCH_SIZE} episódios por execu\u00e7ão, com intervalo entre pedidos; execute novamente para atualizar o restante.</small></div>
-                <button class="green" type="button" data-action="sync-stages" ${syncRunning || digitamaSyncRunning || stageCooldownSyncRunning || bossRushAdvanceRunning ? "disabled" : ""}>${syncRunning ? "Sincronizando…" : "Atualizar mapas"}</button>
+                <button class="green" type="button" data-action="sync-stages" ${marketScanRunning || syncRunning || digitamaSyncRunning || stageCooldownSyncRunning || bossRushAdvanceRunning ? "disabled" : ""}>${syncRunning ? "Sincronizando…" : "Atualizar mapas"}</button>
             </div>
             <section class="config-row sync-config">
                 <div class="config-copy"><strong>Sync opcional</strong><small>Importe ou exporte um JSON para compartilhar dados. O mapa necessário para navegação e cooldowns já está integrado ao userscript.</small></div>
@@ -2533,6 +3016,7 @@
         else if (view === "bosses") renderBosses(false);
         else if (view === "digitamas") renderBosses(true);
         else if (view === "digifarm") renderDigifarm();
+        else if (view === "market-tracker") renderMarketTracker();
         else renderHome();
         updateViewportMetrics();
     }
@@ -2664,7 +3148,7 @@
 
     async function syncStages() {
         if (syncRunning) return;
-        if (digitamaSyncRunning || stageCooldownSyncRunning || bossRushAdvanceRunning) {
+        if (digitamaSyncRunning || stageCooldownSyncRunning || bossRushAdvanceRunning || marketScanRunning) {
             showToast("Aguarde a consulta de cooldown em andamento antes de sincronizar os mapas.");
             return;
         }
@@ -2716,7 +3200,7 @@
             render();
             return;
         }
-        if (syncRunning || stageCooldownSyncRunning || bossRushAdvanceRunning) {
+        if (syncRunning || stageCooldownSyncRunning || bossRushAdvanceRunning || marketScanRunning) {
             digitamaSyncStatus = "A sincroniza\u00e7ão geral já está consultando episódios; aguarde a rodada.";
             render();
             return;
@@ -3138,6 +3622,34 @@
             render();
             void refreshDigitamaCooldowns();
         }
+        else if (action === "view-market-tracker") {
+            modalView = "";
+            view = "market-tracker";
+            marketEditingId = "";
+            marketScanStatus = "Consultando todas as páginas da Black Trader…";
+            render();
+            void scanMarket(true);
+        }
+        else if (action === "mt-open-shop") {
+            openMarketMatchInShop(String(target.dataset.type || ""), String(target.dataset.id || ""));
+        }
+        else if (action === "mt-tab" && ["digimons", "items"].includes(target.dataset.type)) {
+            marketTrackerTab = target.dataset.type;
+            marketEditingId = "";
+            render();
+        }
+        else if (action === "mt-scan") void scanMarket(true);
+        else if (action === "mt-save") saveMarketConfig();
+        else if (action === "mt-cancel-edit") { marketEditingId = ""; render(); }
+        else if (action === "mt-edit") {
+            const config = state.marketTracker[marketTrackerTab].find((item) => item.id === target.dataset.id);
+            if (config) {
+                marketEditingId = config.id;
+                render();
+                content.querySelector("#mt-name")?.focus();
+            }
+        }
+        else if (action === "mt-delete") deleteMarketConfig(String(target.dataset.id || ""));
         else if (action === "view-digifarm") {
             modalView = "";
             view = "digifarm";
@@ -3319,6 +3831,12 @@
 
     store = createStore();
     state = loadState();
+    marketMatches = state.marketMatches;
+    marketBadgeCount = state.marketBadgeCount;
+    marketScanAt = state.marketLastScanAt;
+    marketScanStatus = marketScanAt
+        ? `Última varredura: ${new Date(marketScanAt).toLocaleString("pt-BR")} · ${marketMatches.length} correspondência(s).`
+        : "";
     const builtInMapsChanged = seedBuiltInMaps();
     if ((builtInMapsChanged || stateNeedsMigration) && store) {
         saveState();
@@ -3326,6 +3844,13 @@
     }
     void checkForUpdate(true);
     window.setInterval(() => void checkForUpdate(), UPDATE_CHECK_INTERVAL);
+    if (getMarketConfigCount() && isSafeSyncPage()
+        && (!marketScanAt || Date.now() - marketScanAt >= MARKET_SCAN_INTERVAL)) {
+        void scanMarket();
+    }
+    window.setInterval(() => {
+        if (getMarketConfigCount() && isSafeSyncPage()) void scanMarket();
+    }, MARKET_SCAN_INTERVAL);
     updateViewportMetrics();
 
     const currentEpisode = location.pathname === "/estagios"
